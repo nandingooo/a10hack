@@ -76,11 +76,15 @@ class SandboxManager:
         created = time.time()
         token = secrets.token_urlsafe(32)
 
-        # internal=True: no gateway/NAT to the outside world.
+        # internal=True: no NAT to the outside world.
+        # inhibit_ipv4: the host gets no IP on this bridge. Without it the sandbox can
+        # reach host services (sshd, the sandbox API, ...) via the bridge gateway IP,
+        # because traffic to the host's own addresses is never forwarded or filtered.
         network = self.client.networks.create(
             network_name,
             driver="bridge",
             internal=True,
+            options={"com.docker.network.bridge.inhibit_ipv4": "true"},
             labels={**labels, LABEL_ROLE: "network"},
         )
         try:
