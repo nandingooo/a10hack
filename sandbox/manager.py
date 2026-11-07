@@ -18,6 +18,7 @@ import os
 import re
 import secrets
 import sys
+import time
 from dataclasses import asdict, dataclass
 
 import docker
@@ -27,6 +28,7 @@ log = logging.getLogger("sandbox")
 
 LABEL_SESSION = "a10.session_id"
 LABEL_ROLE = "a10.role"
+LABEL_CREATED = "a10.created_at"
 SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 
@@ -57,6 +59,10 @@ class SandboxManager:
     def __init__(self, config: SandboxConfig | None = None, client=None):
         self.config = config or SandboxConfig()
         self.client = client or docker.from_env()
+        # Last gateway activity per session. In memory only: after a restart, idle time
+        # counts from process start so live sessions are not reaped straight away.
+        self.last_seen: dict[str, float] = {}
+        self.started_at = time.time()
 
     @staticmethod
     def _names(session_id: str) -> tuple[str, str]:
@@ -67,6 +73,7 @@ class SandboxManager:
     def create(self, session_id: str, env: dict[str, str] | None = None) -> SandboxInfo:
         container_name, network_name = self._names(session_id)
         labels = {LABEL_SESSION: session_id}
+        created = time.time()
         token = secrets.token_urlsafe(32)
 
         # internal=True: no gateway/NAT to the outside world.
@@ -87,7 +94,7 @@ class SandboxManager:
                 detach=True,
                 network=network_name,
                 hostname="sandbox",
-                labels={**labels, LABEL_ROLE: "agent"},
+                labels={**labels, LABEL_ROLE: "agent", LABEL_CREATED: str(int(created))},
                 environment={
                     **(env or {}),
                     "SESSION_ID": session_id,
@@ -122,6 +129,7 @@ class SandboxManager:
             session_token=token,
             gateway_attached=gateway_attached,
         )
+        self.last_seen[session_id] = created
         log.info("created sandbox %s", container_name)
         return info
 
@@ -147,6 +155,7 @@ class SandboxManager:
             self._remove_network(self.client.networks.get(network_name))
         except NotFound:
             pass
+        self.last_seen.pop(session_id, None)
         log.info("destroyed sandbox %s", container_name)
 
     def _remove_network(self, network) -> None:
@@ -190,8 +199,57 @@ class SandboxManager:
             env = c.attrs.get("Config", {}).get("Env") or []
             stored = next((e.split("=", 1)[1] for e in env if e.startswith("SESSION_TOKEN=")), None)
             if stored and secrets.compare_digest(stored, token):
-                return c.labels.get(LABEL_SESSION)
+                session_id = c.labels.get(LABEL_SESSION)
+                self.touch(session_id)
+                return session_id
         return None
+
+    def touch(self, session_id: str) -> None:
+        """Record activity so the idle timeout restarts."""
+        self.last_seen[session_id] = time.time()
+
+    def reap(
+        self,
+        max_age: float | None = None,
+        idle_timeout: float | None = None,
+        now: float | None = None,
+    ) -> list[dict]:
+        """Destroy sandboxes that exited, are older than max_age, or idle past idle_timeout.
+
+        Also removes session networks whose container is gone. Returns what was removed.
+        """
+        now = time.time() if now is None else now
+        reaped = []
+        live = set()
+        for c in self._agent_containers():
+            session_id = c.labels.get(LABEL_SESSION)
+            created = float(c.labels.get(LABEL_CREATED, now))
+            idle_since = self.last_seen.get(session_id, max(created, self.started_at))
+            reason = None
+            if c.status in ("exited", "dead"):
+                reason = f"container {c.status}"
+            elif max_age is not None and now - created > max_age:
+                reason = f"older than {max_age:.0f}s"
+            elif idle_timeout is not None and now - idle_since > idle_timeout:
+                reason = f"idle for over {idle_timeout:.0f}s"
+            if reason:
+                self.destroy(session_id)
+                reaped.append({"session_id": session_id, "reason": reason})
+            else:
+                live.add(session_id)
+
+        for net in self.client.networks.list(filters={"label": f"{LABEL_ROLE}=network"}):
+            session_id = (net.attrs.get("Labels") or {}).get(LABEL_SESSION)
+            if session_id not in live and not any(r["session_id"] == session_id for r in reaped):
+                try:
+                    self._remove_network(net)
+                    reaped.append({"session_id": session_id, "reason": "orphaned network"})
+                except (APIError, NotFound):
+                    pass
+
+        for r in reaped:
+            log.info("reaped %s: %s", r["session_id"], r["reason"])
+        return reaped
 
     def exec(self, session_id: str, cmd: list[str]) -> tuple[int, str]:
         container_name, _ = self._names(session_id)
@@ -205,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("create"); p.add_argument("session_id")
     p = sub.add_parser("destroy"); p.add_argument("session_id")
     sub.add_parser("list")
+    p = sub.add_parser("reap", help="remove exited, orphaned, or too-old sandboxes")
+    p.add_argument("--max-age", type=float, default=float(os.getenv("SANDBOX_MAX_AGE", "7200")))
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -215,6 +275,9 @@ def main(argv: list[str] | None = None) -> int:
         mgr.destroy(args.session_id)
     elif args.cmd == "list":
         print(json.dumps(mgr.list(), indent=2))
+    elif args.cmd == "reap":
+        # No idle check here: activity is only tracked inside the API process.
+        print(json.dumps(mgr.reap(max_age=args.max_age), indent=2))
     return 0
 
 

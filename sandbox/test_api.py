@@ -34,6 +34,12 @@ class FakeManager:
     def destroy(self, session_id):
         self.sessions.pop(session_id, None)
 
+    def touch(self, session_id):
+        self.touched = session_id
+
+    def reap(self, max_age=None, idle_timeout=None):
+        return [{"session_id": s, "reason": "test"} for s in list(self.sessions)]
+
     def resolve_token(self, token):
         return next((s for s, i in self.sessions.items() if i.session_token == token), None)
 
@@ -78,3 +84,10 @@ def test_generates_id_and_rejects_bad_ids(client):
     assert r.status_code == 201 and len(r.json()["session_id"]) == 32
     assert client.post("/sessions", json={"session_id": "../x"}, headers=AUTH).status_code == 422
     assert client.get("/sessions/bad..id", headers=AUTH).status_code == 422
+
+
+def test_touch_and_reap(client):
+    client.post("/sessions", json={"session_id": "s1"}, headers=AUTH)
+    assert client.post("/sessions/s1/touch", headers=AUTH).status_code == 204
+    assert client.post("/sessions/nope/touch", headers=AUTH).status_code == 404
+    assert client.post("/reap", headers=AUTH).json() == [{"session_id": "s1", "reason": "test"}]

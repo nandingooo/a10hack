@@ -7,7 +7,13 @@ Callers (gateway, dashboard backend) must send `Authorization: Bearer $SANDBOX_A
   GET    /sessions/{session_id}    one sandbox's status
   DELETE /sessions/{session_id}    destroy a sandbox
   POST   /sessions/resolve         {"token": ...} -> {"session_id": ...}  (gateway: who sent this request?)
+  POST   /sessions/{session_id}/touch   mark activity (resolve does this too)
+  POST   /reap                     run cleanup now
   GET    /healthz                  no auth
+
+A background thread removes sandboxes that exited, are older than SANDBOX_MAX_AGE
+(default 7200s), or idle past SANDBOX_IDLE_TIMEOUT (default 1800s), every
+SANDBOX_REAP_INTERVAL seconds (default 60; 0 disables).
 
 Run: SANDBOX_API_KEY=... uvicorn api:app --app-dir sandbox --port 9000
 """
@@ -17,7 +23,9 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import threading
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
@@ -33,9 +41,32 @@ if not API_KEY:
     API_KEY = secrets.token_urlsafe(24)
     log.warning("SANDBOX_API_KEY not set; generated one for this run: %s", API_KEY)
 
-app = FastAPI(title="a10 sandbox API")
+MAX_AGE = float(os.getenv("SANDBOX_MAX_AGE", "7200"))
+IDLE_TIMEOUT = float(os.getenv("SANDBOX_IDLE_TIMEOUT", "1800"))
+REAP_INTERVAL = float(os.getenv("SANDBOX_REAP_INTERVAL", "60"))
+
 _bearer = HTTPBearer(auto_error=False)
 _manager: SandboxManager | None = None
+
+
+def _reaper_loop(stop: threading.Event) -> None:
+    while not stop.wait(REAP_INTERVAL):
+        try:
+            get_manager().reap(max_age=MAX_AGE, idle_timeout=IDLE_TIMEOUT)
+        except Exception:
+            log.exception("reaper pass failed")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    stop = threading.Event()
+    if REAP_INTERVAL > 0:
+        threading.Thread(target=_reaper_loop, args=(stop,), daemon=True, name="reaper").start()
+    yield
+    stop.set()
+
+
+app = FastAPI(title="a10 sandbox API", lifespan=lifespan)
 
 
 def get_manager() -> SandboxManager:
@@ -83,6 +114,18 @@ def resolve(body: ResolveToken, mgr: SandboxManager = Depends(get_manager)):
     if session_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown token")
     return {"session_id": session_id}
+
+
+@app.post("/reap", dependencies=[Depends(require_key)])
+def reap(mgr: SandboxManager = Depends(get_manager)):
+    return mgr.reap(max_age=MAX_AGE, idle_timeout=IDLE_TIMEOUT)
+
+
+@app.post("/sessions/{session_id}/touch", status_code=204, dependencies=[Depends(require_key)])
+def touch_session(session_id: str, mgr: SandboxManager = Depends(get_manager)):
+    _get_or_404(mgr, session_id)
+    mgr.touch(session_id)
+    return Response(status_code=204)
 
 
 @app.get("/sessions/{session_id}", dependencies=[Depends(require_key)])
