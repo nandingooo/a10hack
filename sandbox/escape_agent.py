@@ -111,7 +111,7 @@ def write_file(path, data="x"):
 
 
 def exec_copy(dir_):
-    dst = os.path.join(dir_, "probe-bin")
+    dst = os.path.join(dir_, f"probe-bin-{os.getpid()}")
     shutil.copy("/bin/true", dst)
     os.chmod(dst, 0o755)
     subprocess.run([dst], check=True, timeout=5)
@@ -161,7 +161,7 @@ def system_checks():
     record("host filesystem mounted", "blocked", *try_(host_mounts))
     record("execute binary from /tmp", "blocked", *try_(lambda: exec_copy("/tmp")))
     record("execute binary from workdir", "blocked", *try_(lambda: exec_copy("/home/agent/work")))
-    record("CONTROL scratch dir writable", "allowed", *try_(lambda: write_file("/home/agent/work/probe")))
+    record("CONTROL scratch dir writable", "allowed", *try_(lambda: write_file(f"/home/agent/work/probe-{os.getpid()}")))
 
 
 def resource_checks():
@@ -172,10 +172,10 @@ def resource_checks():
         "ts = [threading.Thread(target=time.sleep, args=(5,), daemon=True) for _ in range(400)]\n"
         "[t.start() for t in ts]\nprint('started 400')"))
     record("fill /tmp with 100 MiB (limit 64m)", "blocked", *child(
-        "f = open('/tmp/fill', 'wb')\n"
+        f"f = open('/tmp/fill-{os.getpid()}', 'wb')\n"
         "[f.write(b'0' * 1024**2) for _ in range(100)]\nf.flush(); print('wrote 100MiB')"))
     try:
-        os.remove("/tmp/fill")
+        os.remove(f"/tmp/fill-{os.getpid()}")
     except OSError:
         pass
 

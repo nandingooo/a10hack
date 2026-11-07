@@ -56,6 +56,7 @@ def run_agent(mgr: SandboxManager, info, cfg: dict) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--agents", type=int, default=5)
+    ap.add_argument("--per-sandbox", type=int, default=1, help="agents run in parallel inside each sandbox")
     ap.add_argument("--no-gateway", action="store_true", help="don't start a stand-in gateway")
     ap.add_argument("--verbose", action="store_true", help="show every check, not just failures")
     args = ap.parse_args()
@@ -67,7 +68,8 @@ def main() -> int:
     try:
         with ThreadPoolExecutor(args.agents) as pool:
             sessions = list(pool.map(lambda i: mgr.create(f"swarm-{run_id}-{i}"), range(args.agents)))
-        print(f"started {len(sessions)} sandboxes; running escape agent in each...\n")
+        print(f"started {len(sessions)} sandboxes; running {args.per_sandbox} escape agent(s) "
+              f"in parallel in each...\n")
 
         endpoints = []
         for info in sessions:
@@ -83,8 +85,9 @@ def main() -> int:
                 "host_ips": sorted(set(bridge_gw + gateway_ip_of(mgr.client, info.network))),
             }
 
-        with ThreadPoolExecutor(args.agents) as pool:
-            all_results = list(pool.map(lambda p: run_agent(mgr, p[1], cfg_for(*p)), enumerate(sessions)))
+        jobs = [(i, info) for i, info in enumerate(sessions) for _ in range(args.per_sandbox)]
+        with ThreadPoolExecutor(len(jobs)) as pool:
+            all_results = list(pool.map(lambda p: run_agent(mgr, p[1], cfg_for(*p)), jobs))
     finally:
         for info in sessions:
             mgr.destroy(info.session_id)
@@ -110,7 +113,8 @@ def main() -> int:
             if r["ok"]:
                 row["ok"] += 1
             else:
-                row["fail"].append(f"agent {agent_i}: {r['outcome']} — {r['detail']}")
+                sbx, k = divmod(agent_i, args.per_sandbox)
+                row["fail"].append(f"sandbox {sbx} agent {k}: {r['outcome']} — {r['detail']}")
 
     failures = 0
     for check, row in sorted(rows.items(), key=lambda kv: (not kv[1]["fail"], kv[0])):
@@ -122,7 +126,7 @@ def main() -> int:
             for f in row["fail"][:3]:
                 print(f"        {f}")
     total = len(rows)
-    print(f"\n{args.agents} agents, {total} kinds of attempt: {total - failures} held, {failures} FAILED")
+    print(f"\n{args.agents} sandboxes x {args.per_sandbox} agents = {len(all_results)} agents, {total} kinds of attempt: {total - failures} held, {failures} FAILED")
     return 1 if failures else 0
 
 
