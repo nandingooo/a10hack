@@ -17,7 +17,9 @@ class FakeManager:
     def __init__(self):
         self.sessions = {}
 
-    def create(self, session_id, env=None):
+    def create(self, session_id, env=None, agents=None):
+        if agents is not None and agents > 32:
+            raise ValueError("agents must be between 1 and 32")
         info = SandboxInfo(session_id, "cid", f"a10-sbx-{session_id}", f"a10-net-{session_id}",
                            "http://gateway:8080", f"tok-{session_id}", False)
         self.sessions[session_id] = info
@@ -91,3 +93,20 @@ def test_touch_and_reap(client):
     assert client.post("/sessions/s1/touch", headers=AUTH).status_code == 204
     assert client.post("/sessions/nope/touch", headers=AUTH).status_code == 404
     assert client.post("/reap", headers=AUTH).json() == [{"session_id": "s1", "reason": "test"}]
+
+
+def test_agents_sizing(client):
+    assert client.post("/sessions", json={"session_id": "big", "agents": 20}, headers=AUTH).status_code == 201
+    assert client.post("/sessions", json={"agents": 0}, headers=AUTH).status_code == 422
+    assert client.post("/sessions", json={"agents": 99}, headers=AUTH).status_code == 422
+
+
+def test_limits_for():
+    from manager import SandboxConfig
+    cfg = SandboxConfig()
+    assert cfg.limits_for(None)["mem_limit"] == cfg.mem_limit
+    big = cfg.limits_for(20)
+    assert big == {"mem_limit": f"{cfg.base_mem_mb + 20 * cfg.per_agent_mem_mb}m", "cpus": min(cfg.max_cpus, 10.0),
+                   "pids_limit": 704, "tmpfs_size": "224m"}
+    with pytest.raises(ValueError):
+        cfg.limits_for(cfg.max_agents + 1)

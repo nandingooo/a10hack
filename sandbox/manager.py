@@ -19,7 +19,7 @@ import re
 import secrets
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 import docker
 from docker.errors import APIError, NotFound
@@ -29,6 +29,7 @@ log = logging.getLogger("sandbox")
 LABEL_SESSION = "a10.session_id"
 LABEL_ROLE = "a10.role"
 LABEL_CREATED = "a10.created_at"
+LABEL_AGENTS = "a10.agents"
 SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 
@@ -42,6 +43,25 @@ class SandboxConfig:
     pids_limit: int = int(os.getenv("SANDBOX_PIDS", "256"))
     tmpfs_size: str = os.getenv("SANDBOX_TMPFS", "64m")
     command: list[str] | None = None  # None = image default
+    # Sizing when a session asks for N agents (see limits_for).
+    base_mem_mb: int = int(os.getenv("SANDBOX_BASE_MEM_MB", "128"))
+    per_agent_mem_mb: int = int(os.getenv("SANDBOX_PER_AGENT_MEM_MB", "48"))
+    max_agents: int = int(os.getenv("SANDBOX_MAX_AGENTS", "32"))
+    max_cpus: float = float(os.getenv("SANDBOX_MAX_CPUS", "4"))
+
+    def limits_for(self, agents: int | None) -> dict:
+        """Resource limits for a sandbox. None = the fixed defaults above."""
+        if agents is None:
+            return {"mem_limit": self.mem_limit, "cpus": self.cpus,
+                    "pids_limit": self.pids_limit, "tmpfs_size": self.tmpfs_size}
+        if not 1 <= agents <= self.max_agents:
+            raise ValueError(f"agents must be between 1 and {self.max_agents}")
+        return {
+            "mem_limit": f"{self.base_mem_mb + self.per_agent_mem_mb * agents}m",
+            "cpus": min(self.max_cpus, max(1.0, 0.5 * agents)),
+            "pids_limit": 64 + 32 * agents,
+            "tmpfs_size": f"{64 + 8 * agents}m",
+        }
 
 
 @dataclass
@@ -53,6 +73,8 @@ class SandboxInfo:
     gateway_url: str
     session_token: str
     gateway_attached: bool
+    agents: int | None = None
+    limits: dict = field(default_factory=dict)
 
 
 class SandboxManager:
@@ -70,8 +92,12 @@ class SandboxManager:
             raise ValueError(f"invalid session id: {session_id!r}")
         return f"a10-sbx-{session_id}", f"a10-net-{session_id}"
 
-    def create(self, session_id: str, env: dict[str, str] | None = None) -> SandboxInfo:
+    def create(
+        self, session_id: str, env: dict[str, str] | None = None, agents: int | None = None
+    ) -> SandboxInfo:
+        """Create a sandbox. agents=N sizes memory/CPU/process limits for N parallel agents."""
         container_name, network_name = self._names(session_id)
+        limits = self.config.limits_for(agents)
         labels = {LABEL_SESSION: session_id}
         created = time.time()
         token = secrets.token_urlsafe(32)
@@ -98,7 +124,8 @@ class SandboxManager:
                 detach=True,
                 network=network_name,
                 hostname="sandbox",
-                labels={**labels, LABEL_ROLE: "agent", LABEL_CREATED: str(int(created))},
+                labels={**labels, LABEL_ROLE: "agent", LABEL_CREATED: str(int(created)),
+                        LABEL_AGENTS: str(agents or "")},
                 environment={
                     **(env or {}),
                     "SESSION_ID": session_id,
@@ -108,15 +135,15 @@ class SandboxManager:
                 user="10001:10001",
                 read_only=True,
                 tmpfs={
-                    "/tmp": f"rw,noexec,nosuid,size={self.config.tmpfs_size}",
-                    "/home/agent/work": f"rw,noexec,nosuid,uid=10001,size={self.config.tmpfs_size}",
+                    "/tmp": f"rw,noexec,nosuid,size={limits['tmpfs_size']}",
+                    "/home/agent/work": f"rw,noexec,nosuid,uid=10001,size={limits['tmpfs_size']}",
                 },
                 cap_drop=["ALL"],
                 security_opt=["no-new-privileges:true"],
-                mem_limit=self.config.mem_limit,
-                memswap_limit=self.config.mem_limit,
-                nano_cpus=int(self.config.cpus * 1e9),
-                pids_limit=self.config.pids_limit,
+                mem_limit=limits["mem_limit"],
+                memswap_limit=limits["mem_limit"],
+                nano_cpus=int(limits["cpus"] * 1e9),
+                pids_limit=limits["pids_limit"],
                 init=True,
                 auto_remove=False,
             )
@@ -132,6 +159,8 @@ class SandboxManager:
             gateway_url=gateway_url,
             session_token=token,
             gateway_attached=gateway_attached,
+            agents=agents,
+            limits=limits,
         )
         self.last_seen[session_id] = created
         log.info("created sandbox %s", container_name)
@@ -181,6 +210,7 @@ class SandboxManager:
             "container": c.name,
             "status": c.status,
             "created_at": c.attrs.get("Created"),
+            "agents": int(c.labels[LABEL_AGENTS]) if c.labels.get(LABEL_AGENTS) else None,
         }
 
     def list(self) -> list[dict]:
@@ -265,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage per-session agent sandboxes")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("create"); p.add_argument("session_id")
+    p.add_argument("--agents", type=int, help="size the sandbox for N parallel agents")
     p = sub.add_parser("destroy"); p.add_argument("session_id")
     sub.add_parser("list")
     p = sub.add_parser("reap", help="remove exited, orphaned, or too-old sandboxes")
@@ -274,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     mgr = SandboxManager()
     if args.cmd == "create":
-        print(json.dumps(asdict(mgr.create(args.session_id)), indent=2))
+        print(json.dumps(asdict(mgr.create(args.session_id, agents=args.agents)), indent=2))
     elif args.cmd == "destroy":
         mgr.destroy(args.session_id)
     elif args.cmd == "list":

@@ -164,16 +164,28 @@ def system_checks():
     record("CONTROL scratch dir writable", "allowed", *try_(lambda: write_file(f"/home/agent/work/probe-{os.getpid()}")))
 
 
+def cgroup_limit(name, default):
+    try:
+        v = open(f"/sys/fs/cgroup/{name}").read().strip()
+        return default if v == "max" else int(v)
+    except OSError:
+        return default
+
+
 def resource_checks():
-    record("allocate 1 GiB memory (limit 512m)", "blocked",
-           *child("b = bytearray(1024**3); b[::4096] = b'x' * len(b[::4096]); print('allocated')"))
-    record("start 400 threads (pids limit 256)", "blocked", *child(
+    mem_mib = cgroup_limit("memory.max", 512 * 2**20) // 2**20 + 256
+    pids = cgroup_limit("pids.max", 256) + 100
+    st = os.statvfs("/tmp")
+    tmp_mib = st.f_blocks * st.f_frsize // 2**20 + 32
+    record("allocate past memory limit", "blocked", *child(
+        f"b = bytearray({mem_mib} * 2**20); b[::4096] = b'x' * len(b[::4096]); print('allocated {mem_mib} MiB')"))
+    record("exceed process limit", "blocked", *child(
         "import threading, time\n"
-        "ts = [threading.Thread(target=time.sleep, args=(5,), daemon=True) for _ in range(400)]\n"
-        "[t.start() for t in ts]\nprint('started 400')"))
-    record("fill /tmp with 100 MiB (limit 64m)", "blocked", *child(
+        f"ts = [threading.Thread(target=time.sleep, args=(5,), daemon=True) for _ in range({pids})]\n"
+        f"[t.start() for t in ts]\nprint('started {pids}')"))
+    record("fill /tmp past its size", "blocked", *child(
         f"f = open('/tmp/fill-{os.getpid()}', 'wb')\n"
-        "[f.write(b'0' * 1024**2) for _ in range(100)]\nf.flush(); print('wrote 100MiB')"))
+        f"[f.write(b'0' * 2**20) for _ in range({tmp_mib})]\nf.flush(); print('wrote {tmp_mib} MiB')"))
     try:
         os.remove(f"/tmp/fill-{os.getpid()}")
     except OSError:

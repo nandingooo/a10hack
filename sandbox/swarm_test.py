@@ -57,6 +57,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--agents", type=int, default=5)
     ap.add_argument("--per-sandbox", type=int, default=1, help="agents run in parallel inside each sandbox")
+    ap.add_argument("--size", action=argparse.BooleanOptionalAction, default=True,
+                    help="size each sandbox for --per-sandbox agents (default on)")
     ap.add_argument("--no-gateway", action="store_true", help="don't start a stand-in gateway")
     ap.add_argument("--verbose", action="store_true", help="show every check, not just failures")
     args = ap.parse_args()
@@ -67,7 +69,9 @@ def main() -> int:
     sessions = []
     try:
         with ThreadPoolExecutor(args.agents) as pool:
-            sessions = list(pool.map(lambda i: mgr.create(f"swarm-{run_id}-{i}"), range(args.agents)))
+            sessions = list(pool.map(
+                lambda i: mgr.create(f"swarm-{run_id}-{i}", agents=args.per_sandbox if args.size else None),
+                range(args.agents)))
         print(f"started {len(sessions)} sandboxes; running {args.per_sandbox} escape agent(s) "
               f"in parallel in each...\n")
 

@@ -84,6 +84,7 @@ def require_key(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -
 class CreateSession(BaseModel):
     session_id: str | None = Field(None, pattern=SESSION_ID_RE.pattern)
     env: dict[str, str] = Field(default_factory=dict)
+    agents: int | None = Field(None, ge=1, description="size the sandbox for N parallel agents")
 
 
 class ResolveToken(BaseModel):
@@ -100,7 +101,10 @@ def create_session(body: CreateSession, mgr: SandboxManager = Depends(get_manage
     session_id = body.session_id or uuid.uuid4().hex
     if mgr.get(session_id) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"session {session_id} already exists")
-    return asdict(mgr.create(session_id, env=body.env))
+    try:
+        return asdict(mgr.create(session_id, env=body.env, agents=body.agents))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/sessions", dependencies=[Depends(require_key)])
