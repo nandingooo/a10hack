@@ -1,0 +1,7 @@
+{
+  "docs/readme.md":            {"trust": "trusted",   "sensitivity": "public"},
+  "docs/q3-plan.md":           {"trust": "trusted",   "sensitivity": "sensitive"},
+  "web/downloaded-page.html":  {"trust": "untrusted", "sensitivity": "public"},
+  "secrets/api-keys.txt":      {"trust": "trusted",   "sensitivity": "secret"},
+  ".decoy/aws-credentials":    {"trust": "trusted",   "sensitivity": "secret", "bait": true}
+}
