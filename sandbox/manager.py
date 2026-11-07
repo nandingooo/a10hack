@@ -158,13 +158,40 @@ class SandboxManager:
                 pass
         network.remove()
 
+    def _agent_containers(self):
+        return self.client.containers.list(all=True, filters={"label": f"{LABEL_ROLE}=agent"})
+
+    @staticmethod
+    def _summary(c) -> dict:
+        return {
+            "session_id": c.labels.get(LABEL_SESSION),
+            "container": c.name,
+            "status": c.status,
+            "created_at": c.attrs.get("Created"),
+        }
+
     def list(self) -> list[dict]:
-        out = []
-        for c in self.client.containers.list(all=True, filters={"label": f"{LABEL_ROLE}=agent"}):
-            out.append(
-                {"session_id": c.labels.get(LABEL_SESSION), "container": c.name, "status": c.status}
-            )
-        return out
+        return [self._summary(c) for c in self._agent_containers()]
+
+    def get(self, session_id: str) -> dict | None:
+        container_name, _ = self._names(session_id)
+        try:
+            return self._summary(self.client.containers.get(container_name))
+        except NotFound:
+            return None
+
+    def resolve_token(self, token: str) -> str | None:
+        """Return the session id that owns this token, or None.
+
+        The token lives only in the container's environment, so the mapping survives
+        restarts of this process without a separate store.
+        """
+        for c in self._agent_containers():
+            env = c.attrs.get("Config", {}).get("Env") or []
+            stored = next((e.split("=", 1)[1] for e in env if e.startswith("SESSION_TOKEN=")), None)
+            if stored and secrets.compare_digest(stored, token):
+                return c.labels.get(LABEL_SESSION)
+        return None
 
     def exec(self, session_id: str, cmd: list[str]) -> tuple[int, str]:
         container_name, _ = self._names(session_id)
