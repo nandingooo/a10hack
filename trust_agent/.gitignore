@@ -1,0 +1,15 @@
+# Python caches / test artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# runtime logs / captures (not source)
+experiments/*.log
+experiments/stream.json
+experiments/claude_err.txt
+*.log
+
+# local env
+.venv/
+venv/

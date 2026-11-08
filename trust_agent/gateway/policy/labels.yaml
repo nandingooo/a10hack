@@ -1,0 +1,19 @@
+# AgentAirlock policy (AGENTS.md section 7.1). Hand-edited. Patterns only; no real data.
+trust:
+  trusted:   ["user", "operator"]            # matched against an activity's origin
+  untrusted: ["cloned-repo", "web", "tool-output", "download"]
+  # any other origin -> unknown -> treated as untrusted (fail closed)
+
+sensitivity:
+  secret:    ["**/.env", "**/.aws/credentials", "**/.ssh/*", "**/*token*", "**/*.pem", "**/id_rsa*"]
+  sensitive: ["**/config/*", "**/*.log", "**/customers/*"]
+  # everything else -> public
+
+bait:
+  files: ["**/aws_prod_credentials.txt", "**/.env.production.local"]
+  token: "AKIA_FAKE_BAIT_DO_NOT_USE"         # clearly-fake planted honeytoken value
+
+egress:
+  approved_hosts: ["github.com", "pypi.org", "*.pythonhosted.org", "bedrock-runtime.*.amazonaws.com"]
+
+workspace_root: "/work"                        # everything under here is in_workspace
