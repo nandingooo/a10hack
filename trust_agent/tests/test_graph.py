@@ -60,15 +60,17 @@ def test_laundering_through_an_intermediate_file_is_caught():
     assert agg.confidence < 1.0                    # inferred edges, weakest hop
 
 
-def test_precision_unrelated_action_not_overblocked():
+def test_session_taint_persists_across_actions():
     g = GraphStore()
     g.append(read("s", "/repo/vendor/README.md", trust=Trust.UNTRUSTED))  # untrusted read
-    g.append(write("s", "/repo/notes.txt"))        # consumes the working set (the read)
-    # a later action with NO reads feeding it must NOT inherit the earlier taint
+    g.append(write("s", "/repo/notes.txt"))        # intervening action (would clear the recency window)
     a = net("s", "github.com")
     g.append(a)
     agg = g.aggregate("s", a)
-    assert not agg.reached_untrusted               # queue would wrongly say True here
+    # Agent context persists across turns: the untrusted read is still reachable
+    # session-wide even after an intervening action. (Precision is enforced at
+    # DECISION time instead: an exit to an APPROVED host like github is allowed.)
+    assert agg.reached_untrusted
 
 
 def test_secret_reaches_exit():

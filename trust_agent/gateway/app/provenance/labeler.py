@@ -98,9 +98,15 @@ class Labeler:
     def is_bait_target(self, op: str, target: str, body: str = "") -> bool:
         if match(target or "", self.cfg.bait_files):
             return True
+        blob = f"{target or ''} {body or ''}"
         # the canary token leaving via ANY channel (curl in a bash cmd, a web body) is a confirmed leak
-        if self.cfg.bait_token and self.cfg.bait_token in (body or ""):
+        if self.cfg.bait_token and self.cfg.bait_token in blob:
             return True
+        # a bait filename referenced inside a command/body (e.g. `cat aws_prod_credentials.txt`)
+        for pattern in self.cfg.bait_files:
+            base = pattern.replace("\\", "/").rsplit("/", 1)[-1]
+            if base and base in blob:
+                return True
         return False
 
     def label(self, path: str, origin: str) -> Labels:

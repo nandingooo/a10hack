@@ -108,6 +108,22 @@ class GraphStore(ProvenanceStore):
             for pid in e.parents:
                 c = self._conf.get(nid, {}).get(pid, 1.0)
                 stack.append((pid, min(path_conf, c)))
+        # Agent context persists across turns: a source the session read ANYWHERE
+        # is still in the model's context, so it stays reachable even if the
+        # recency window / intervening actions dropped it from the trace path.
+        for e in self._by_session.get(session_id, []):
+            if e.id == action_entry.id:
+                continue
+            lbl = e.labels
+            if lbl.effective_trust == Trust.UNTRUSTED and not agg.reached_untrusted:
+                agg.reached_untrusted = True
+                supporting.append(e.id)
+            if lbl.sensitivity == Sensitivity.SECRET and not agg.reached_secret:
+                agg.reached_secret = True
+                supporting.append(e.id)
+            if lbl.bait and not agg.reached_bait:
+                agg.reached_bait = True
+                supporting.append(e.id)
         agg.supporting_entry_ids = supporting
         agg.confidence = weakest if supporting else 1.0
         return agg

@@ -26,8 +26,9 @@ if _APP not in sys.path:
 
 from provenance import (  # noqa: E402
     ActionProps, Channel, ContextEntry, GraphStore, Kind, Labeler, Op,
-    Sensitivity, SqliteStore, new_entry_id,
+    Sensitivity, SqliteStore, Trust, new_entry_id,
 )
+import provenance.command as cmdparse  # noqa: E402
 from monitor.daemon import default_policy, resolve_origin  # noqa: E402
 
 ACTION_OPS = {"WriteFile", "DeleteFile", "RunCommand", "NetworkRequest", "CallTool"}
@@ -62,6 +63,44 @@ class Brain:
         store_kill = getattr(self.store, "kill", None)   # persist the kill (SqliteStore)
         if store_kill:
             store_kill(session)
+
+    def _append(self, session, op, target, labels, kind, action_props, origin):
+        e = ContextEntry(id=self._next_id(session), ts=time.time(), session_id=session, kind=kind,
+                         channel=Channel.HOOK, op=op, target=target, origin=origin,
+                         labels=labels, action_props=action_props)
+        self.store.append(e)
+        return e
+
+    def _decide_bash(self, session, cmd):
+        """Evaluate the file reads and outbound connections a shell command
+        performs. Returns a verdict dict if the command is dangerous, else None."""
+        # 1. record untrusted/secret file reads the command references (provenance)
+        for raw in cmdparse.file_tokens(cmd):
+            ftok = raw if raw.startswith("/") else "/" + raw  # relative -> absolute for glob/marker match
+            origin = resolve_origin("ReadFile", ftok)
+            lbl = self.labeler.label(ftok, origin)
+            if lbl.bait or self.labeler.is_bait_target("RunCommand", ftok, cmd):
+                self.kill(session)
+                return _v("stop", "bait_touched", "bait file referenced in shell command", 1.0)
+            if lbl.sensitivity == Sensitivity.SECRET or lbl.effective_trust == Trust.UNTRUSTED:
+                kind = Kind.SECRET if lbl.sensitivity == Sensitivity.SECRET else Kind.SOURCE
+                self._append(session, Op.READ_FILE, ftok, lbl, kind, None, origin)
+        # 2. outbound connections inside the command (curl/wget/...)
+        for host in cmdparse.hosts_in(cmd):
+            if not self.labeler.approved_host(host):
+                ne = self._append(session, Op.NETWORK_REQUEST, host,
+                                  self.labeler.label(host, "web"), Kind.ACTION,
+                                  ActionProps(is_exit=True), "web")
+                agg = self.store.aggregate(session, ne)
+                if agg.reached_secret:
+                    return _v("block", "secret_exit",
+                              "secret data reaching an unapproved exit (shell)", agg.confidence)
+                if agg.reached_untrusted:
+                    return _v("block", "lethal_trifecta",
+                              "untrusted input reaching an unapproved exit (shell)", agg.confidence)
+                return _v("block", "egress_allowlist",
+                          "shell command exits to an unapproved host", 1.0)
+        return None
 
     def decide(self, req: dict) -> dict:
         session = req.get("session_id") or "unknown"
@@ -105,6 +144,13 @@ class Brain:
 
         if not is_action:
             return _v("allow", "read_recorded", "context read; labeled and recorded", 1.0)
+
+        # Decompose a Bash command into the actions it performs (reads + exits),
+        # so a single `cat .env && curl evil` is not opaque to the guard.
+        if op == "RunCommand":
+            sub = self._decide_bash(session, str(args.get("command") or target or ""))
+            if sub is not None:
+                return sub
 
         agg = self.store.aggregate(session, entry)   # trace_back over the graph
         c = agg.confidence

@@ -171,6 +171,21 @@ class SqliteStore:
                 weakest = min(weakest, path_conf)
             for pid, conf in self._parents(nid):
                 stack.append((pid, min(path_conf, conf)))
+        # Agent context persists across turns: a source read ANYWHERE in the
+        # session is still reachable (it is in the model's context).
+        for r in self._db.execute(
+            "SELECT id, trust, sensitivity, bait FROM entries WHERE session_id = ? AND id <> ?",
+            (session_id, action_entry.id),
+        ):
+            if r["trust"] == "untrusted" and not agg.reached_untrusted:
+                agg.reached_untrusted = True
+                supporting.append(r["id"])
+            if r["sensitivity"] == "secret" and not agg.reached_secret:
+                agg.reached_secret = True
+                supporting.append(r["id"])
+            if r["bait"] and not agg.reached_bait:
+                agg.reached_bait = True
+                supporting.append(r["id"])
         agg.supporting_entry_ids = supporting
         agg.confidence = weakest if supporting else 1.0
         return agg

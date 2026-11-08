@@ -27,27 +27,36 @@ except Exception:
     pass
 
 
-def _respond(permission: str, label: str, rule: str, reason: str) -> int:
-    """Structured PreToolUse response so Claude Code renders a clean denial
-    (shown in red to the user, reason fed back to the agent)."""
-    msg = f"TrustAgent {label} [{rule}]: {reason}"
+def _emit(decision: str, rule: str, reason: str, confidence, action: str) -> int:
+    """Structured PreToolUse response so Claude Code renders a clear, attributed
+    block: a banner for the user + an explicit 'blocked by TrustAgent' reason
+    fed back to the agent, so it's unmistakable this came from OUR service."""
+    stopped = decision == "stop"
+    label = "STOPPED  (session killed)" if stopped else ("BLOCKED" if decision != "ask" else "NEEDS APPROVAL")
+    banner = (
+        "\n"
+        "==================  TRUSTAGENT GUARD  ==================\n"
+        f"  {label}\n"
+        f"  rule:    {rule}\n"
+        f"  reason:  {reason} (confidence {confidence})\n"
+        f"  action:  {action}\n"
+        + ("  status:  SESSION KILLED - all further actions refused\n" if stopped else "")
+        + "========================================================"
+    )
+    agent_reason = (
+        f"BLOCKED BY THE TRUSTAGENT GUARD SERVICE (not the model's own safety). "
+        f"rule={rule}; reason={reason}; confidence={confidence}; action={action}."
+        + (" The session is now KILLED; every further tool call will also be refused." if stopped else "")
+    )
     print(json.dumps({
-        "systemMessage": msg,
+        "systemMessage": banner,
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": permission,          # "deny" | "ask" | "allow"
-            "permissionDecisionReason": msg,
+            "permissionDecision": "ask" if decision == "ask" else "deny",
+            "permissionDecisionReason": agent_reason,
         },
     }))
     return 0
-
-
-def _deny(rule: str, reason: str) -> int:
-    return _respond("deny", "BLOCKED", rule, reason)
-
-
-def _ask(rule: str, reason: str) -> int:
-    return _respond("ask", "NEEDS APPROVAL", rule, reason)
 
 
 def to_request(ev: dict):
@@ -87,14 +96,13 @@ def main() -> int:
         )
         verdict = json.loads(r.read())
     except Exception as e:  # service down/unreachable -> fail closed
-        return _deny("fail_closed", f"decision service unreachable: {e}")
+        action = f"{req['op']} {str(req.get('target', ''))[:120]}"
+        return _emit("block", "fail_closed", f"decision service unreachable: {e}", 1.0, action)
     decision = verdict.get("decision", "allow")
-    rule = verdict.get("rule", "")
-    reason = f"{verdict.get('reason', '')} (confidence {verdict.get('confidence')})"
-    if decision in ("block", "stop"):
-        return _deny(rule, reason)
-    if decision == "ask":
-        return _ask(rule, reason)
+    if decision in ("block", "stop", "ask"):
+        action = f"{req['op']} {str(req.get('target', ''))[:120]}"
+        return _emit(decision, verdict.get("rule", ""), verdict.get("reason", ""),
+                     verdict.get("confidence"), action)
     return 0  # allow
 
 
