@@ -128,6 +128,55 @@ class GraphStore(ProvenanceStore):
         agg.confidence = weakest if supporting else 1.0
         return agg
 
+    def working_set(self, session_id: str) -> list[str]:
+        """Source ids read since the last action — the recency parents the next
+        action would inherit. Used by the guard to trace a *prospective* sink
+        (phase=before) before it is appended."""
+        return list(self._working.get(session_id, []))
+
+    def reachable_from(self, session_id: str, parent_ids, extra_entries=()):
+        """Pure trace_back (NO whole-session union fallback): the tags actually
+        reachable from ``parent_ids`` plus ``extra_entries`` (unstored provisional
+        reads a command references), by BFS over ``parents``. This is the precise,
+        source-level reachability — it answers "did poison really flow INTO this
+        action?", not "did the session ever touch poison anywhere?". Returns an
+        Aggregate whose ``supporting_entry_ids`` is the traced path."""
+        agg = Aggregate()
+        supporting: list[str] = []
+        weakest = 1.0
+        seen: set[str] = set()
+        extra = {e.id: e for e in extra_entries}
+        stack: list[tuple[str, float]] = [(pid, 1.0) for pid in parent_ids]
+        stack += [(e.id, 1.0) for e in extra_entries]
+        while stack:
+            nid, path_conf = stack.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            e = extra.get(nid) or self._index.get(nid)
+            if e is None:
+                continue
+            lbl = e.labels
+            hit = False
+            if lbl.effective_trust == Trust.UNTRUSTED:
+                agg.reached_untrusted = True
+                hit = True
+            if lbl.sensitivity == Sensitivity.SECRET:
+                agg.reached_secret = True
+                hit = True
+            if lbl.bait:
+                agg.reached_bait = True
+                hit = True
+            if hit:
+                supporting.append(nid)
+                weakest = min(weakest, path_conf)
+            for pid in e.parents:
+                c = self._conf.get(nid, {}).get(pid, 1.0)
+                stack.append((pid, min(path_conf, c)))
+        agg.supporting_entry_ids = supporting
+        agg.confidence = weakest if supporting else 1.0
+        return agg
+
     # ---- multi-agent / inter-agent provenance ----
 
     def session_taint(self, session_id: str) -> Aggregate:

@@ -19,8 +19,14 @@ from lifecycle import Lifecycle, encode_entry, decode_entry
 
 
 class Brain:
-    def __init__(self, store=None, policy=None):
+    def __init__(self, store=None, policy=None, trace_gate=None):
         self.store = store if store is not None else GraphStore()
+        # Source-level trace_back gate: the graph traversal drives the decision
+        # (block only when poison actually flows INTO the action), with the
+        # conservative session union kept as the fail-closed floor for strict /
+        # opaque sessions. Default ON; set AIRLOCK_TRACE_GATE=0 (or trace_gate=False)
+        # to fall back to the pure session-union behavior.
+        self.trace_gate = (os.environ.get('AIRLOCK_TRACE_GATE') != '0') if trace_gate is None else trace_gate
         self.labeler = Labeler(policy or Policy.load())
         self.policy_digest=hashlib.sha256(json.dumps(asdict(self.labeler.cfg),sort_keys=True).encode()).hexdigest()
         self.state = Lifecycle(self.store)
@@ -195,6 +201,9 @@ class Brain:
         entry = self._entry(session, op, target, origin, channel, profile)
         entries, evidence, secret, untrusted = self._context(session)
         provisional = []
+        referenced = []   # clean (trusted/public) files a command reads: recorded as real
+                          # provenance nodes so the graph reflects every read, but they never
+                          # change a verdict (only secret/untrusted provisional entries do).
         cmd = str(args.get('command') or target) if op == 'RunCommand' else ''
         if cmd:
             for raw in dict.fromkeys(command.file_tokens(cmd)):
@@ -202,6 +211,9 @@ class Brain:
                 item = self._entry(session, 'ReadFile', path, self._origin(path, profile), channel, profile, 'shell_reference_inference')
                 if item.labels.sensitivity == Sensitivity.SECRET or item.labels.effective_trust == Trust.UNTRUSTED:
                     provisional.append(item)
+                elif not profile.get('strict'):
+                    # strict sessions already materialize the whole workspace via inventory below
+                    referenced.append(item)
         inventory = self._inventory(profile) if cmd and profile.get('strict') else {}
         if cmd and profile.get('strict'):
             # Arbitrary interpreters can consume any readable workspace file. Do
@@ -222,6 +234,12 @@ class Brain:
                                  basis='proposed_shell_reference' if item.metadata['basis']=='shell_reference_inference' else item.metadata['basis']))
             secret |= item.labels.sensitivity == Sensitivity.SECRET
             untrusted |= item.labels.effective_trust == Trust.UNTRUSTED
+        for item in referenced:
+            # Visible in the provenance graph as a real read, but trusted/public so it
+            # never changes a verdict. 'shell_read' is deliberately kept out of the
+            # low-confidence inference heuristic below (reading your own files is certain).
+            evidence.append(dict(id=item.id, target=item.target, trust=item.labels.effective_trust.value,
+                                 sensitivity=item.labels.sensitivity.value, basis='shell_read'))
         unresolved = self._pending(session)
         if channel == 'egress':
             # A command's inferred inputs apply before its first outbound connection.
@@ -254,6 +272,21 @@ class Brain:
                     return True
             return False
         permitted_upload=bool(urls) and all(permitted_resource(url) for url in urls)
+        # Precise source-level reachability for THIS prospective sink: BFS back
+        # over the provenance graph from what feeds the action (recency working
+        # set + the files the command references), with NO union fallback. This
+        # is the "sequence of files behind the decision". It is surfaced on every
+        # verdict; it only CHANGES a verdict when trace_gate is on (and then only
+        # the design-sanctioned over-block), with the union kept as the floor for
+        # strict/opaque sessions where we can't observe the real data flow.
+        trace = None
+        if hasattr(self.store, 'reachable_from') and consequential:
+            feed = provisional + referenced
+            seeds = self.store.working_set(session) + [i.id for i in feed]
+            trace = self.store.reachable_from(session, seeds, extra_entries=feed)
+        trace_on = bool(self.trace_gate and trace is not None and not profile.get('strict'))
+        gate_untrusted = trace.reached_untrusted if trace_on else untrusted
+        gate_secret = trace.reached_secret if trace_on else secret
         if self.labeler.is_bait_target(op, target, json.dumps(args)):
             # Block this action ONLY; do not revoke the session. The canary access
             # is flagged (operator can STOP manually), but the agent continues.
@@ -273,8 +306,8 @@ class Brain:
         elif profile.get('strict') and hosts and upload and not permitted_upload and not authorized_secret:
             verdict = self._v('block','task_boundary','Outbound write is outside the operator-authorized resource scope')
         elif any(not h or not self.labeler.approved_host(h) for h in hosts):
-            verdict = self._v('block', 'secret_exit' if secret else 'lethal_trifecta' if untrusted else 'egress_allowlist', 'Unapproved destination')
-        elif (op in ('DeleteFile','MoveFile') or command.is_destructive(cmd)) and untrusted and op not in profile.get('allowed_operations',[]):
+            verdict = self._v('block', 'secret_exit' if gate_secret else 'lethal_trifecta' if gate_untrusted else 'egress_allowlist', 'Unapproved destination')
+        elif (op in ('DeleteFile','MoveFile') or command.is_destructive(cmd)) and gate_untrusted and op not in profile.get('allowed_operations',[]):
             verdict = self._v('block', 'untrusted_destructive', 'Untrusted context may influence this destructive operation')
         elif op in ('CallTool','ModelCall') and target not in self.labeler.cfg.allowed_tools:
             verdict = self._v('block', 'unmodeled_tool', 'Tool needs an operator-defined policy')
@@ -284,6 +317,15 @@ class Brain:
                        policy_digest=self.policy_digest,
                        decision_id=uuid.uuid4().hex, latency_ms=round((time.perf_counter()-start)*1000, 3),
                        context=dict(untrusted=untrusted, secret=secret, unresolved=len(unresolved)))
+        if trace is not None:
+            # The sequence of files/sources the decision actually traces back to,
+            # with weakest-hop confidence. `trace_gate` says whether this trace
+            # (vs the conservative union) decided the verdict.
+            id2tgt = {e.id: e.target for e in entries}
+            id2tgt.update({p.id: p.target for p in provisional})
+            verdict.update(trace_path=[id2tgt.get(sid, sid) for sid in trace.supporting_entry_ids],
+                           trace_confidence=trace.confidence, trace_gate=trace_on,
+                           trace_basis=('graph_path' if trace.supporting_entry_ids else 'no_reachable_source'))
         if any('inference' in e.get('basis','') or e.get('basis') in ('proposed_shell_reference','inflight_operation') or e.get('exposure_status')=='unknown' for e in evidence):
             verdict['confidence']=0.4 # inference heuristic, not a calibrated probability
         # Sensor-reported client identity is display-only; it never changes policy or labels.
@@ -292,7 +334,7 @@ class Brain:
             self.state.put('agent_identity', session, {'agent': agent})
         self.state.log(session, dict(type='decision', tool_use_id=tool_id, op=op,
             target='[shell command]' if cmd else target, **verdict))
-        candidates = provisional + ([entry] if op in ('ReadFile','WriteFile','CopyFile','MoveFile','NetworkRequest') else [])
+        candidates = provisional + referenced + ([entry] if op in ('ReadFile','WriteFile','CopyFile','MoveFile','NetworkRequest') else [])
         for item in candidates:
             item.verdict, item.rule = verdict['decision'], verdict['rule']
         attempt = dict(session_id=session, tool_use_id=tool_id, fingerprint=fingerprint,
