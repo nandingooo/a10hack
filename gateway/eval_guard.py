@@ -131,7 +131,12 @@ def main() -> None:
     ap.add_argument("--models", nargs="+", default=["86M"], choices=list(MODELS))
     ap.add_argument("--deepset", action="store_true")
     ap.add_argument("--cases", action="store_true", help="print every case's score")
+    ap.add_argument("--window", type=int, default=classifier.WINDOW,
+                    help="tokens per scoring window (gateway default 512)")
     a = ap.parse_args()
+    if a.window != classifier.WINDOW:
+        classifier.WINDOW, classifier.STRIDE = a.window, min(classifier.STRIDE, a.window // 4)
+        print(f"scoring windows: {classifier.WINDOW} tokens, stride {classifier.STRIDE}")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     models = [MODELS[m] for m in a.models]
     ours = load_cases()
