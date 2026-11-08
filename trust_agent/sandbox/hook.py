@@ -21,6 +21,10 @@ import urllib.request
 URL = os.environ.get("AIRLOCK_URL", "http://127.0.0.1:8787") + "/decide"
 READ = {"Read", "Grep", "Glob", "NotebookRead"}
 WRITE = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+# Shell tools vary by platform: Claude Code uses "Bash" on macOS/Linux and
+# "PowerShell" on Windows. All map to RunCommand so the command is decomposed
+# and evaluated (not treated as an opaque unmodeled tool).
+SHELL = {"Bash", "PowerShell", "Shell", "Cmd"}
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # robust unicode on Windows pipes
@@ -70,8 +74,9 @@ def to_request(ev: dict):
     if tool in WRITE:
         return {"session_id": session, "op": "WriteFile",
                 "target": inp.get("file_path") or inp.get("path") or "", "args": inp}
-    if tool == "Bash":
-        return {"session_id": session, "op": "RunCommand", "target": inp.get("command") or "", "args": inp}
+    if tool in SHELL:
+        return {"session_id": session, "op": "RunCommand",
+                "target": inp.get("command") or inp.get("script") or "", "args": inp}
     if tool == "WebFetch":
         url = str(inp.get("url") or "")
         return {"session_id": session, "op": "NetworkRequest", "target": url, "args": {"url": url, "method":"GET"}}
