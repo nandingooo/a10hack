@@ -188,7 +188,8 @@ def screen(state: SessionState, kind: str, source: str, content: str, tags: dict
                  f"prompt guard score {v.score:.2f} >= {classifier.THRESHOLD}; read treated as untrusted",
                  alert=True)
     record(state, "prompt_guard", {"source_kind": kind, "source": source, "score": v.score,
-                                   "hidden_parts": v.hidden_parts, "tags_before": tags}, d)
+                                   "hidden_parts": v.hidden_parts, "truncated": v.truncated,
+                                   "tags_before": tags}, d)
     return {**tags, "trust": "untrusted"}
 
 

@@ -24,6 +24,7 @@ docker run -d --name a10-gateway \
   -e SANDBOX_API_KEY -e GATEWAY_ADMIN_KEY -e APPROVED_DESTINATIONS -e OFFLINE \
   ${RISK_URL:+-e RISK_URL} \
   -e PROMPT_GUARD ${PROMPT_GUARD_THRESHOLD:+-e PROMPT_GUARD_THRESHOLD} ${HF_TOKEN:+-e HF_TOKEN} \
+  ${PROMPT_GUARD_MODEL:+-e PROMPT_GUARD_MODEL} ${PROMPT_GUARD_MAX_CHARS:+-e PROMPT_GUARD_MAX_CHARS} \
   -v a10-hf-cache:/hf \
   ${LLM_UPSTREAM:+-e LLM_UPSTREAM} ${ANTHROPIC_API_KEY:+-e ANTHROPIC_API_KEY} \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \

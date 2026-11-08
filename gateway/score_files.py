@@ -5,8 +5,8 @@
   python gateway/score_files.py                     # every file in gateway/workspace/files
   python gateway/score_files.py some.md other.html  # or specific files
 
-Prints the read's score (what the gateway would use), the full-text score, the best hidden-part
-score and the time taken. Files are only read and scored; nothing in them is acted on.
+Prints the read's score (what the gateway would use), the score of the visible text (first
+PROMPT_GUARD_MAX_CHARS), the best hidden-part score and the time taken. Files are only read and scored; nothing in them is acted on.
 """
 
 from __future__ import annotations
