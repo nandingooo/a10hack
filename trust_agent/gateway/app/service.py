@@ -65,6 +65,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == '/sessions':
             self._send(200, {'sessions':BRAIN.sessions()})
         elif self.path == '/agents':
+            # every session the gateway has seen, incl. hook-mode (un-configured) ones
+            self._send(200, {'agents': BRAIN.agents()})
+        elif self.path == '/agents':
             self._send(200, {'agents':BRAIN.agents()})
         elif urlsplit(self.path).path == '/entries':
             sid = parse_qs(urlsplit(self.path).query).get('session_id',[MANAGED_SESSION])[0]
