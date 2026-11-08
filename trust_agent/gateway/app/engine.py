@@ -48,6 +48,20 @@ class Brain:
         with self.lock:
             return self.state.values('session')
 
+    def agents(self):
+        """Every session seen by this gateway (hook-mode sessions are never 'configured'),
+        newest activity first, with live status."""
+        with self.lock:
+            configured = {s['session_id']: s for s in self.state.values('session')}
+            rows = {r['session_id']: r for r in self.state.activity()}
+            agents = []
+            for sid in configured.keys() | rows.keys():
+                row = rows.get(sid, dict(session_id=sid, events=0, last_seq=0, first_ts=None,
+                                         last_ts=None, decisions=0, denials=0))
+                agents.append(dict(row, status='KILLED' if self._is_killed(sid) else 'ACTIVE',
+                                   managed=sid in configured, strict=bool(configured.get(sid, {}).get('strict'))))
+        return sorted(agents, key=lambda a: a['last_ts'] or 0, reverse=True)
+
     def events(self, session=None, after=0):
         with self.lock:
             return self.state.events(session, after)

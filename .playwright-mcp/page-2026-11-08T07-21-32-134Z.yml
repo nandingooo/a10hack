@@ -1,0 +1,47 @@
+- main [ref=f2e3]:
+  - navigation [ref=f2e4]:
+    - link "TrustAgent home" [ref=f2e5] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=f2e10]:
+      - link "Agents" [ref=f2e11] [cursor=pointer]:
+        - /url: "#agents"
+      - link "Console" [ref=f2e12] [cursor=pointer]:
+        - /url: "#console"
+      - link "Architecture" [ref=f2e13] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=f2e14] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=f2e15]:
+      - link "Sign in" [ref=f2e16] [cursor=pointer]:
+        - /url: "#signin"
+      - button "☾ Dark" [ref=f2e17] [cursor=pointer]
+      - generic [ref=f2e18]:
+        - generic [ref=f2e19]: Managed ready
+        - button "Workspace tools" [ref=f2e21] [cursor=pointer]
+  - generic [ref=f2e26]:
+    - link "Sign in with the workspace code" [ref=f2e27] [cursor=pointer]:
+      - /url: "#signin"
+    - text: to see agents.
+  - generic [ref=f2e28]:
+    - link "TrustAgent home" [ref=f2e29] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=f2e34]:
+      - heading "Workspace" [level=2] [ref=f2e35]
+      - link "Agent console" [ref=f2e36] [cursor=pointer]:
+        - /url: "#console"
+      - link "Live demo" [ref=f2e37] [cursor=pointer]:
+        - /url: "#live"
+    - generic [ref=f2e38]:
+      - heading "Resources" [level=2] [ref=f2e39]
+      - link "Architecture" [ref=f2e40] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=f2e41] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=f2e42]:
+      - heading "Account" [level=2] [ref=f2e43]
+      - link "Sign in" [ref=f2e44] [cursor=pointer]:
+        - /url: "#signin"
+      - link "Back to top ↑" [ref=f2e45] [cursor=pointer]:
+        - /url: "#top"

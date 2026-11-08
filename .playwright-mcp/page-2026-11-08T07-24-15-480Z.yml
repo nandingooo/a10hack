@@ -1,0 +1,154 @@
+- main [ref=f3e3]:
+  - navigation [ref=f3e4]:
+    - link "TrustAgent home" [ref=f3e5] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=f3e10]:
+      - link "Agents" [ref=f3e11] [cursor=pointer]:
+        - /url: "#agents"
+      - link "Console" [ref=f3e12] [cursor=pointer]:
+        - /url: "#console"
+      - link "Architecture" [ref=f3e13] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=f3e14] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=f3e15]:
+      - link "Account" [ref=f3e16] [cursor=pointer]:
+        - /url: "#account"
+      - button "☾ Dark" [ref=f3e17] [cursor=pointer]
+      - generic [ref=f3e18]:
+        - generic [ref=f3e19]: Run ended
+        - button "Workspace tools" [ref=f3e21] [cursor=pointer]
+  - region "Agents, activity and provenance graph" [ref=f3e25]:
+    - generic [ref=f3e26]:
+      - heading "Agents" [level=1] [ref=f3e27]
+      - generic [ref=f3e28]: Hook guard connected · http://127.0.0.1:8788
+      - button "■ Stop agent" [disabled] [ref=f3e30]
+    - generic [ref=f3e31]:
+      - complementary "Agents" [ref=f3e32]:
+        - heading "Claude Code sessions" [level=2] [ref=f3e33]
+        - list [ref=f3e34]:
+          - listitem [ref=f3e35]:
+            - button "056e6365-327f-4e40 stopped · 3 decisions · 4m ago 1" [pressed] [ref=f3e36] [cursor=pointer]:
+              - generic [ref=f3e38]:
+                - generic [ref=f3e39]: 056e6365-327f-4e40
+                - generic [ref=f3e40]: stopped · 3 decisions · 4m ago
+              - emphasis [ref=f3e41]: "1"
+        - heading "Managed sandbox runs" [level=2] [ref=f3e42]
+        - list [ref=f3e43]:
+          - listitem [ref=f3e44]:
+            - button "Managed session cb2a2329 · Running" [ref=f3e45] [cursor=pointer]:
+              - generic [ref=f3e47]:
+                - generic [ref=f3e48]: Managed session
+                - generic [ref=f3e49]: cb2a2329 · Running
+          - listitem [ref=f3e50]:
+            - button "Managed session 7f31bbb6 · Stopped" [ref=f3e51] [cursor=pointer]:
+              - generic [ref=f3e53]:
+                - generic [ref=f3e54]: Managed session
+                - generic [ref=f3e55]: 7f31bbb6 · Stopped
+          - listitem [ref=f3e56]:
+            - button "Managed session c3627426 · Stopped" [ref=f3e57] [cursor=pointer]:
+              - generic [ref=f3e59]:
+                - generic [ref=f3e60]: Managed session
+                - generic [ref=f3e61]: c3627426 · Stopped
+          - listitem [ref=f3e62]:
+            - button "Managed session c3bf8691 · Running" [ref=f3e63] [cursor=pointer]:
+              - generic [ref=f3e65]:
+                - generic [ref=f3e66]: Managed session
+                - generic [ref=f3e67]: c3bf8691 · Running
+          - listitem [ref=f3e68]:
+            - button "Managed session 8404a2d7 · Stopped" [ref=f3e69] [cursor=pointer]:
+              - generic [ref=f3e71]:
+                - generic [ref=f3e72]: Managed session
+                - generic [ref=f3e73]: 8404a2d7 · Stopped
+      - generic [ref=f3e74]:
+        - generic [ref=f3e75]:
+          - generic [ref=f3e76]: Provenance graph
+          - generic [ref=f3e77]: 056e6365-327f-4e40
+        - generic [ref=f3e207]:
+          - generic [ref=f3e208]:
+            - button "▶ Replay tree build" [active] [ref=f3e209] [cursor=pointer]
+            - button "↺ Replay traversal" [disabled] [ref=f3e210]
+            - generic [ref=f3e211]:
+              - checkbox "All evidence edges" [ref=f3e212]
+              - text: All evidence edges
+            - generic [ref=f3e213]: 9 nodes · 18 edges
+          - generic [aria-hidden] [ref=f3e214]:
+            - generic [ref=f3e215]: trusted
+            - generic [ref=f3e216]: untrusted
+            - generic [ref=f3e217]: secret
+            - generic [ref=f3e218]: bait
+            - generic [ref=f3e219]: allow
+            - generic [ref=f3e220]: block
+            - generic [ref=f3e221]: stop
+          - img "Provenance graph" [ref=f3e223]:
+            - button "[shell command] no_dangerous_flow Operation satisfies current policy" [ref=f3e224] [cursor=pointer]:
+              - generic [ref=f3e226]: RunCommand
+              - generic [ref=f3e227]: ALLOW · no_dangerous_flow
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run no_dangerous_flow shell_reference_inference" [ref=f3e228] [cursor=pointer]:
+              - generic [ref=f3e230]: demo-run
+              - generic [ref=f3e231]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/digest.md no_dangerous_flow shell_reference_inference" [ref=f3e232] [cursor=pointer]:
+              - generic [ref=f3e234]: digest.md
+              - generic [ref=f3e235]: read · untrusted
+          - paragraph [ref=f3e236]: Click a decision (or any node) to trace the context that could have reached it.
+      - complementary "Agent activity" [ref=f3e137]:
+        - generic [ref=f3e138]:
+          - generic [ref=f3e139]: Activity
+          - generic [ref=f3e140]: 5 events
+        - list [ref=f3e237]:
+          - listitem [ref=f3e238]:
+            - time [ref=f3e239]: "#6 · 11:19:52 PM"
+            - generic [ref=f3e240]:
+              - generic [ref=f3e241]: ENFORCED
+              - strong [ref=f3e242]: DENIED_BEFORE_EXECUTION
+            - code [ref=f3e243]: bait_touched
+          - listitem [ref=f3e244]:
+            - button "#5 · 11:19:52 PM STOP WriteFile · C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/NOTES.md bait_touched" [ref=f3e245] [cursor=pointer]:
+              - time [ref=f3e246]: "#5 · 11:19:52 PM"
+              - generic [ref=f3e247]:
+                - generic [ref=f3e248]: STOP
+                - strong [ref=f3e249]: WriteFile · C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/NOTES.md
+              - code [ref=f3e250]: bait_touched
+          - listitem [ref=f3e251]:
+            - time [ref=f3e252]: "#3 · 11:19:46 PM"
+            - generic [ref=f3e253]:
+              - generic [ref=f3e254]: result
+              - strong [ref=f3e255]: result
+            - paragraph [ref=f3e256]: execution succeeded · exposure exposed
+          - listitem [ref=f3e257]:
+            - button "#2 · 11:19:41 PM ALLOW RunCommand · [shell command] no_dangerous_flow" [ref=f3e258] [cursor=pointer]:
+              - time [ref=f3e259]: "#2 · 11:19:41 PM"
+              - generic [ref=f3e260]:
+                - generic [ref=f3e261]: ALLOW
+                - strong [ref=f3e262]: RunCommand · [shell command]
+              - code [ref=f3e263]: no_dangerous_flow
+          - listitem [ref=f3e264]:
+            - button "#1 · 11:19:37 PM ALLOW RunCommand · [shell command] no_dangerous_flow" [ref=f3e265] [cursor=pointer]:
+              - time [ref=f3e266]: "#1 · 11:19:37 PM"
+              - generic [ref=f3e267]:
+                - generic [ref=f3e268]: ALLOW
+                - strong [ref=f3e269]: RunCommand · [shell command]
+              - code [ref=f3e270]: no_dangerous_flow
+  - generic [ref=f3e175]:
+    - link "TrustAgent home" [ref=f3e176] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=f3e181]:
+      - heading "Workspace" [level=2] [ref=f3e182]
+      - link "Agent console" [ref=f3e183] [cursor=pointer]:
+        - /url: "#console"
+      - link "Live demo" [ref=f3e184] [cursor=pointer]:
+        - /url: "#live"
+    - generic [ref=f3e185]:
+      - heading "Resources" [level=2] [ref=f3e186]
+      - link "Architecture" [ref=f3e187] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=f3e188] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=f3e189]:
+      - heading "Account" [level=2] [ref=f3e190]
+      - link "Your account" [ref=f3e191] [cursor=pointer]:
+        - /url: "#account"
+      - link "Back to top ↑" [ref=f3e192] [cursor=pointer]:
+        - /url: "#top"

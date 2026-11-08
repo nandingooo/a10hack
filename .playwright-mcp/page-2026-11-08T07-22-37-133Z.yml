@@ -1,0 +1,190 @@
+- main [ref=f2e3]:
+  - navigation [ref=f2e4]:
+    - link "TrustAgent home" [ref=f2e5] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=f2e10]:
+      - link "Agents" [ref=f2e11] [cursor=pointer]:
+        - /url: "#agents"
+      - link "Console" [ref=f2e12] [cursor=pointer]:
+        - /url: "#console"
+      - link "Architecture" [ref=f2e13] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=f2e14] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=f2e15]:
+      - link "Account" [ref=f2e46] [cursor=pointer]:
+        - /url: "#account"
+      - button "☾ Dark" [ref=f2e17] [cursor=pointer]
+      - generic [ref=f2e18]:
+        - generic [ref=f2e19]: Session live
+        - button "Workspace tools" [ref=f2e21] [cursor=pointer]
+  - region "Agents, activity and provenance graph" [ref=f2e47]:
+    - generic [ref=f2e48]:
+      - heading "Agents" [level=1] [ref=f2e49]
+      - generic [ref=f2e50]: Hook guard connected · http://127.0.0.1:8788
+      - button "■ Stop agent" [disabled] [ref=f2e52]
+    - generic [ref=f2e53]:
+      - complementary "Agents" [ref=f2e54]:
+        - heading "Claude Code sessions" [level=2] [ref=f2e55]
+        - list [ref=f2e56]:
+          - listitem [ref=f2e57]:
+            - button "056e6365-327f-4e40 stopped · 3 decisions · 3m ago 1" [active] [pressed] [ref=f2e58] [cursor=pointer]:
+              - generic [ref=f2e60]:
+                - generic [ref=f2e61]: 056e6365-327f-4e40
+                - generic [ref=f2e62]: stopped · 3 decisions · 3m ago
+              - emphasis [ref=f2e63]: "1"
+        - heading "Managed sandbox runs" [level=2] [ref=f2e64]
+        - list [ref=f2e65]:
+          - listitem [ref=f2e66]:
+            - button "Managed session cb2a2329 · Running" [ref=f2e67] [cursor=pointer]:
+              - generic [ref=f2e69]:
+                - generic [ref=f2e70]: Managed session
+                - generic [ref=f2e71]: cb2a2329 · Running
+          - listitem [ref=f2e72]:
+            - button "Managed session 7f31bbb6 · Stopped" [ref=f2e73] [cursor=pointer]:
+              - generic [ref=f2e75]:
+                - generic [ref=f2e76]: Managed session
+                - generic [ref=f2e77]: 7f31bbb6 · Stopped
+          - listitem [ref=f2e78]:
+            - button "Managed session c3627426 · Stopped" [ref=f2e79] [cursor=pointer]:
+              - generic [ref=f2e81]:
+                - generic [ref=f2e82]: Managed session
+                - generic [ref=f2e83]: c3627426 · Stopped
+          - listitem [ref=f2e84]:
+            - button "Managed session c3bf8691 · Running" [ref=f2e85] [cursor=pointer]:
+              - generic [ref=f2e87]:
+                - generic [ref=f2e88]: Managed session
+                - generic [ref=f2e89]: c3bf8691 · Running
+          - listitem [ref=f2e90]:
+            - button "Managed session 8404a2d7 · Stopped" [ref=f2e91] [cursor=pointer]:
+              - generic [ref=f2e93]:
+                - generic [ref=f2e94]: Managed session
+                - generic [ref=f2e95]: 8404a2d7 · Stopped
+      - generic [ref=f2e96]:
+        - generic [ref=f2e97]:
+          - generic [ref=f2e98]: Provenance graph
+          - generic [ref=f2e99]: 056e6365-327f-4e40
+        - generic [ref=f2e100]:
+          - generic [ref=f2e101]:
+            - button "▶ Replay tree build" [ref=f2e102] [cursor=pointer]
+            - button "↺ Replay traversal" [disabled] [ref=f2e103]
+            - generic [ref=f2e104]:
+              - checkbox "All evidence edges" [ref=f2e105]
+              - text: All evidence edges
+            - generic [ref=f2e106]: 15 nodes · 18 edges
+          - generic [aria-hidden] [ref=f2e107]:
+            - generic [ref=f2e108]: trusted
+            - generic [ref=f2e109]: untrusted
+            - generic [ref=f2e110]: secret
+            - generic [ref=f2e111]: bait
+            - generic [ref=f2e112]: allow
+            - generic [ref=f2e113]: block
+            - generic [ref=f2e114]: stop
+          - img "Provenance graph" [ref=f2e116]:
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run proposed_shell_reference" [ref=f2e123] [cursor=pointer]:
+              - generic [ref=f2e125]: demo-run
+              - generic [ref=f2e126]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/digest.md proposed_shell_reference" [ref=f2e127] [cursor=pointer]:
+              - generic [ref=f2e129]: digest.md
+              - generic [ref=f2e130]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/.env proposed_shell_reference" [ref=f2e131] [cursor=pointer]:
+              - generic [ref=f2e133]: .env
+              - generic [ref=f2e134]: secret read · secret
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/src/app.py proposed_shell_reference" [ref=f2e135] [cursor=pointer]:
+              - generic [ref=f2e137]: app.py
+              - generic [ref=f2e138]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/vendor/README.md proposed_shell_reference" [ref=f2e139] [cursor=pointer]:
+              - generic [ref=f2e141]: README.md
+              - generic [ref=f2e142]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/config/settings.ini proposed_shell_reference" [ref=f2e143] [cursor=pointer]:
+              - generic [ref=f2e145]: settings.ini
+              - generic [ref=f2e146]: read · untrusted
+            - button "[shell command] no_dangerous_flow Operation satisfies current policy" [ref=f2e147] [cursor=pointer]:
+              - generic [ref=f2e149]: RunCommand
+              - generic [ref=f2e150]: ALLOW · no_dangerous_flow
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run no_dangerous_flow shell_reference_inference" [ref=f2e151] [cursor=pointer]:
+              - generic [ref=f2e153]: demo-run
+              - generic [ref=f2e154]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/digest.md no_dangerous_flow shell_reference_inference" [ref=f2e155] [cursor=pointer]:
+              - generic [ref=f2e157]: digest.md
+              - generic [ref=f2e158]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/vendor/README.md no_dangerous_flow shell_reference_inference" [ref=f2e159] [cursor=pointer]:
+              - generic [ref=f2e161]: README.md
+              - generic [ref=f2e162]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/src/app.py no_dangerous_flow shell_reference_inference" [ref=f2e163] [cursor=pointer]:
+              - generic [ref=f2e165]: app.py
+              - generic [ref=f2e166]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/config/settings.ini no_dangerous_flow shell_reference_inference" [ref=f2e167] [cursor=pointer]:
+              - generic [ref=f2e169]: settings.ini
+              - generic [ref=f2e170]: read · untrusted
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/.env no_dangerous_flow shell_reference_inference" [ref=f2e171] [cursor=pointer]:
+              - generic [ref=f2e173]: .env
+              - generic [ref=f2e174]: secret read · secret
+            - button "[shell command] no_dangerous_flow Operation satisfies current policy" [ref=f2e175] [cursor=pointer]:
+              - generic [ref=f2e177]: RunCommand
+              - generic [ref=f2e178]: ALLOW · no_dangerous_flow
+            - button "C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/NOTES.md bait_touched Canary policy triggered; managed run must terminate" [ref=f2e179] [cursor=pointer]:
+              - generic [ref=f2e181]: WriteFile
+              - generic [ref=f2e182]: STOP · bait_touched
+          - paragraph [ref=f2e183]: Click a decision (or any node) to trace the context that could have reached it.
+      - complementary "Agent activity" [ref=f2e184]:
+        - generic [ref=f2e185]:
+          - generic [ref=f2e186]: Activity
+          - generic [ref=f2e187]: 5 events
+        - list [ref=f2e188]:
+          - listitem [ref=f2e189]:
+            - time [ref=f2e190]: "#6 · 11:19:52 PM"
+            - generic [ref=f2e191]:
+              - generic [ref=f2e192]: ENFORCED
+              - strong [ref=f2e193]: DENIED_BEFORE_EXECUTION
+            - code [ref=f2e194]: bait_touched
+          - listitem [ref=f2e195]:
+            - button "#5 · 11:19:52 PM STOP WriteFile · C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/NOTES.md bait_touched" [ref=f2e196] [cursor=pointer]:
+              - time [ref=f2e197]: "#5 · 11:19:52 PM"
+              - generic [ref=f2e198]:
+                - generic [ref=f2e199]: STOP
+                - strong [ref=f2e200]: WriteFile · C:/Users/jackd/AppData/Local/Temp/claude/e628850931edde32/29b84598-2773-4feb-95fc-767a5c9e29bf/scratchpad/demo-run/NOTES.md
+              - code [ref=f2e201]: bait_touched
+          - listitem [ref=f2e202]:
+            - time [ref=f2e203]: "#3 · 11:19:46 PM"
+            - generic [ref=f2e204]:
+              - generic [ref=f2e205]: result
+              - strong [ref=f2e206]: result
+            - paragraph [ref=f2e207]: execution succeeded · exposure exposed
+          - listitem [ref=f2e208]:
+            - button "#2 · 11:19:41 PM ALLOW RunCommand · [shell command] no_dangerous_flow" [ref=f2e209] [cursor=pointer]:
+              - time [ref=f2e210]: "#2 · 11:19:41 PM"
+              - generic [ref=f2e211]:
+                - generic [ref=f2e212]: ALLOW
+                - strong [ref=f2e213]: RunCommand · [shell command]
+              - code [ref=f2e214]: no_dangerous_flow
+          - listitem [ref=f2e215]:
+            - button "#1 · 11:19:37 PM ALLOW RunCommand · [shell command] no_dangerous_flow" [ref=f2e216] [cursor=pointer]:
+              - time [ref=f2e217]: "#1 · 11:19:37 PM"
+              - generic [ref=f2e218]:
+                - generic [ref=f2e219]: ALLOW
+                - strong [ref=f2e220]: RunCommand · [shell command]
+              - code [ref=f2e221]: no_dangerous_flow
+  - generic [ref=f2e28]:
+    - link "TrustAgent home" [ref=f2e29] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=f2e34]:
+      - heading "Workspace" [level=2] [ref=f2e35]
+      - link "Agent console" [ref=f2e36] [cursor=pointer]:
+        - /url: "#console"
+      - link "Live demo" [ref=f2e37] [cursor=pointer]:
+        - /url: "#live"
+    - generic [ref=f2e38]:
+      - heading "Resources" [level=2] [ref=f2e39]
+      - link "Architecture" [ref=f2e40] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=f2e41] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=f2e42]:
+      - heading "Account" [level=2] [ref=f2e43]
+      - link "Your account" [ref=f2e222] [cursor=pointer]:
+        - /url: "#account"
+      - link "Back to top ↑" [ref=f2e45] [cursor=pointer]:
+        - /url: "#top"

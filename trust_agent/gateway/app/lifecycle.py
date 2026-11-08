@@ -69,6 +69,18 @@ class Lifecycle:
         cursor = self.db.execute('INSERT INTO lifecycle_audit(session_id,payload) VALUES (?,?)', (session, json.dumps(event)))
         return cursor.lastrowid
 
+    def activity(self):
+        """Per-session audit rollup: every session that has produced any event, live or not."""
+        rows = self.db.execute('''
+            SELECT session_id, COUNT(*), MAX(seq),
+                   MIN(json_extract(payload,'$.ts')), MAX(json_extract(payload,'$.ts')),
+                   SUM(json_extract(payload,'$.type')='decision'),
+                   SUM(json_extract(payload,'$.type')='decision'
+                       AND json_extract(payload,'$.decision') IN ('block','stop'))
+            FROM lifecycle_audit GROUP BY session_id''')
+        return [dict(session_id=r[0], events=r[1], last_seq=r[2], first_ts=r[3], last_ts=r[4],
+                     decisions=r[5] or 0, denials=r[6] or 0) for r in rows]
+
     def events(self, session=None, after=0):
         rows = self.db.execute('SELECT seq,payload FROM lifecycle_audit WHERE seq>? AND (? IS NULL OR session_id=?) ORDER BY seq LIMIT 1000',
                                (after, session, session))

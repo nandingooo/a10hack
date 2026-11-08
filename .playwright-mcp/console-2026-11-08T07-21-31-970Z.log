@@ -1,0 +1,11 @@
+[  127629ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/state:0
+[  127778ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/live?session=056e6365-327f-4e40-96a3-6aa22558c546:0
+[  128638ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/state:0
+[  128793ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/live?session=056e6365-327f-4e40-96a3-6aa22558c546:0
+[  129643ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/state:0
+[  129799ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/live?session=056e6365-327f-4e40-96a3-6aa22558c546:0
+[  130647ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/state:0
+[  130811ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/live?session=056e6365-327f-4e40-96a3-6aa22558c546:0
+[  131654ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/state:0
+[  131826ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8799/api/live?session=056e6365-327f-4e40-96a3-6aa22558c546:0
+[  132669ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8799/api/state:0

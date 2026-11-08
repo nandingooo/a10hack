@@ -1,0 +1,94 @@
+/* Agents page: live agent list, provenance graph with build/trace animation, activity feed. */
+.agentsPage { --bait: #d98cf0; --trace: var(--accent) }
+:root[data-theme="light"] .agentsPage { --bait: #9b3fb8 }
+
+.agentsGrid {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr) 320px; min-height: 640px;
+  border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); overflow: hidden;
+  background: var(--background);
+}
+.agentList, .activityFeed { display: flex; flex-direction: column; min-height: 0; background: var(--surface) }
+.agentList { border-right: 1px solid var(--line); padding: 12px 0; overflow: auto; max-height: 820px }
+.agentList h2 { padding: 10px 16px 6px; font: var(--fs-label)/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint) }
+.agentList ul { list-style: none; margin: 0; padding: 0 8px }
+.agentList .muted { padding: 4px 16px 12px; font-size: 13px; color: var(--text-secondary) }
+.agentRow {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent;
+  border-radius: var(--r-sm); background: none; color: inherit; text-align: left; cursor: pointer;
+}
+.agentRow:hover { background: var(--button) }
+.agentRow.selected { background: var(--button); border-color: var(--border-accent) }
+.agentRow span { display: grid; min-width: 0; flex: 1 }
+.agentRow b { font: 500 12.5px/1.35 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.agentRow small { font-size: 11.5px; color: var(--text-faint) }
+.agentRow em { font: 600 11px/1 var(--font-mono); font-style: normal; padding: 3px 6px; border-radius: 999px; color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent) }
+
+.graphPane { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line) }
+.agentGraph { display: flex; flex-direction: column; flex: 1; min-height: 0 }
+.graphTools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface) }
+.graphTools label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary) }
+.graphStats { margin-left: auto; font: var(--fs-label)/1 var(--font-mono); color: var(--text-faint) }
+.graphLegend { display: flex; flex-wrap: wrap; gap: 12px; padding: 6px 12px; font: var(--fs-label)/1 var(--font-mono); color: var(--text-secondary); border-bottom: 1px solid var(--line) }
+.graphLegend span::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 3px; background: var(--c); vertical-align: -1px }
+.graphCanvas { flex: 1; min-height: 360px; max-height: 620px; overflow: auto; background-image: radial-gradient(var(--grid) 1px, transparent 1px); background-size: 18px 18px }
+.graphCanvas svg { display: block }
+.graphCanvas marker path { fill: var(--line-strong) }
+
+/* colour per node class (also used by legend and chips) */
+.taint-clean { --c: var(--ok) }
+.taint-untrusted { --c: var(--warn) }
+.taint-secret { --c: var(--bad) }
+.taint-bait { --c: var(--bait) }
+.decision.allow { --c: var(--ok) }
+.decision.block { --c: var(--warn) }
+.decision.stop, .decision.ask { --c: var(--bad) }
+
+.gnode { cursor: pointer; outline: none }
+.gnode rect { fill: color-mix(in srgb, var(--c) 10%, var(--surface)); stroke: color-mix(in srgb, var(--c) 55%, var(--line)); stroke-width: 1.2 }
+.gnode.decision rect { stroke-width: 1.8 }
+.gnode:hover rect, .gnode:focus-visible rect { stroke: var(--c); stroke-width: 2 }
+.gLabel { font: 500 12px var(--font-mono); fill: var(--text-primary) }
+.gCaption { font: 10.5px var(--font-mono); fill: color-mix(in srgb, var(--c) 75%, var(--text-secondary)) }
+.gnode.traced rect { stroke: var(--trace); stroke-width: 2.2 }
+.gnode.frontier rect { stroke: var(--trace); stroke-width: 3; fill: color-mix(in srgb, var(--trace) 22%, var(--surface)) }
+
+.gedge { fill: none; stroke: var(--line-strong); stroke-width: 1.3 }
+.gedge.evidence { stroke-dasharray: .015 .01; opacity: .75 }
+.gedge.traced { stroke: var(--trace); stroke-width: 2.4; opacity: 1 }
+
+.traceHint, .traceSummary { padding: 10px 14px; border-top: 1px solid var(--line); background: var(--surface); font-size: 13px; color: var(--text-secondary) }
+.traceSummary strong { display: block; margin-bottom: 4px; font: 500 12.5px var(--font-mono); color: var(--text-primary) }
+.traceSummary ol { margin: 0 0 6px; padding-left: 18px; font: 12px/1.6 var(--font-mono) }
+.traceSummary p { line-height: 1.9 }
+.traceSummary code { font-size: 12px }
+.taintChip { display: inline-block; margin: 0 4px 2px 0; padding: 1px 7px; border-radius: 999px; font: 11px/1.6 var(--font-mono); color: var(--c); background: color-mix(in srgb, var(--c) 13%, transparent) }
+
+.activityFeed { min-width: 0; overflow: hidden }
+.activityFeed .actionList { list-style: none; margin: 0; padding: 0; max-height: 760px; overflow-x: hidden }
+.actionItem.focused { background: color-mix(in srgb, var(--trace) 9%, var(--surface)) }
+.ide .activityFeed .feedButton {
+  display: block; width: 100%; min-width: 0; height: auto; padding: 0; border: 0; border-radius: 0;
+  background: none; color: inherit; font: inherit; text-align: left; white-space: normal; cursor: pointer;
+}
+.ide .activityFeed .feedButton:hover { background: none }
+.activityFeed .feedButton:hover strong { color: var(--accent) }
+.activityFeed .feedButton:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Tree creation: each node pops in and each edge draws itself the moment it first renders. */
+  .gnode { animation: nodeIn .42s cubic-bezier(.2, .9, .3, 1.3) both }
+  .gedge:not(.evidence) { stroke-dasharray: 1; animation: edgeDraw .55s ease-out both }
+  .gedge.evidence { animation: fadeIn .55s ease-out both }
+  .gedge.traced { stroke-dasharray: 1; animation: edgeDraw .6s ease-out both }
+  .gnode.frontier rect { animation: frontierPulse .75s ease-in-out infinite alternate }
+}
+@keyframes nodeIn { from { opacity: 0; translate: -10px 0 } to { opacity: 1; translate: 0 0 } }
+@keyframes edgeDraw { from { stroke-dashoffset: 1; opacity: 0 } to { stroke-dashoffset: 0; opacity: 1 } }
+@keyframes fadeIn { from { opacity: 0 } }
+@keyframes frontierPulse { to { stroke-width: 4.5 } }
+
+@media (max-width: 1100px) {
+  .agentsGrid { grid-template-columns: 1fr }
+  .agentList, .graphPane { border-right: 0; border-bottom: 1px solid var(--line) }
+  .agentList { max-height: 260px }
+}

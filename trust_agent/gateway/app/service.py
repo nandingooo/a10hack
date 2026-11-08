@@ -64,6 +64,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {'session_id':sid,'status':'KILLED' if sid and BRAIN._is_killed(sid) else 'ACTIVE'})
         elif self.path == '/sessions':
             self._send(200, {'sessions':BRAIN.sessions()})
+        elif self.path == '/agents':
+            self._send(200, {'agents':BRAIN.agents()})
         elif urlsplit(self.path).path == '/entries':
             sid = parse_qs(urlsplit(self.path).query).get('session_id',[MANAGED_SESSION])[0]
             self._send(200, {'entries':[asdict(e) for e in BRAIN.store.get_entries(sid)]})

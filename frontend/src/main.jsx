@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LiveWorkspace, useGateway } from './LiveWorkspace.jsx';
 import { MANAGED, useManagedGateway } from './managedGateway.js';
+import AgentsPage from './AgentsPage.jsx';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
@@ -176,15 +177,16 @@ function App() {
   useEffect(() => { fetch('/auth/me').then(r => r.json()).then(setProfile).catch(() => {}); }, []);
   const accountPage = ['#signin','#account','#signin-error'].includes(hash);
   const consolePage = hash === '#console';
+  const agentsPage = MANAGED && hash === '#agents';
   useEffect(() => {
     const changed = () => setHash(location.hash);
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, []);
   useEffect(() => {
-    if (consolePage) window.scrollTo(0, 0);
+    if (consolePage || agentsPage) window.scrollTo(0, 0);
     else document.getElementById(hash.slice(1))?.scrollIntoView();
-  }, [hash, consolePage]);
+  }, [hash, consolePage, agentsPage]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('airlock-theme', theme);
@@ -194,8 +196,9 @@ function App() {
     PREPARED: 'starting', RUNNING: 'running', STOPPING: 'stopping', STOPPED: 'finished', UNAVAILABLE: 'unavailable',
   })[state?.run?.status] || 'preview')
     : state?.running ? 'running' : state?.id ? 'finished' : 'preview';
-  return <main id="top"><nav><Brand/><div className="navLinks"><a href="#console">Console</a><a href="#architecture">Architecture</a><a href="#faq">FAQ</a></div><div className="navControls"><a className="signinLink" href={profile.name ? "#account" : "#signin"}>{profile.name ? "Account" : "Sign in"}</a><button className="themeSwitch" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀ Light' : '☾ Dark'}</button><WorkspaceTools mode={mode} launch={launch} /></div></nav>
-    {accountPage ? <SignIn profile={profile} setProfile={setProfile} failed={hash === "#signin-error"}/> : consolePage ? <LiveWorkspace full {...workspace} /> : <>
+  return <main id="top"><nav><Brand/><div className="navLinks">{MANAGED && <a href="#agents">Agents</a>}<a href="#console">Console</a><a href="#architecture">Architecture</a><a href="#faq">FAQ</a></div><div className="navControls"><a className="signinLink" href={profile.name ? "#account" : "#signin"}>{profile.name ? "Account" : "Sign in"}</a><button className="themeSwitch" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀ Light' : '☾ Dark'}</button><WorkspaceTools mode={mode} launch={launch} /></div></nav>
+    {accountPage ? <SignIn profile={profile} setProfile={setProfile} failed={hash === "#signin-error"}/> : agentsPage ? <AgentsPage managed={managed} signedIn={Boolean(profile.name)} setProfile={setProfile} />
+      : consolePage ? <LiveWorkspace full {...workspace} /> : <>
     <section className="hero"><div className="eyebrow"><i className="dot"/> CLI AGENT CONTROL PLANE</div><HeroHeadline /><p>See what your coding agent reads, where its traffic goes,<br className="desktop"/> and why the guard steps in.</p><div className="heroActions"><button className="primary" onClick={() => document.getElementById('live').scrollIntoView()}>Watch live agents <span>↗</span></button><a href="#architecture">How it works ↓</a></div><code className="heroCmd"><span aria-hidden="true">$</span> {MANAGED ? 'python3 frontend/managed.py' : 'python3 demo/gateway.py'}</code></section>
     <LiveWorkspace {...workspace} />
     <section className="architecture" id="architecture"><div className="eyebrow">ARCHITECTURE</div><h2>From a file read to a verdict.</h2><div className="cards">{features.map(([id,title,body]) => <article key={id}><div className={'glyph '+id} aria-hidden="true">{id==='box'?'⬡':id==='queue'?'≡':'◇'}</div><h3>{title}</h3><p>{body}</p></article>)}</div></section>

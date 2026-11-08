@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from demo import signin
+from live_gateway import GatewayUnavailable, LiveGateway, valid_session
 
 
 FRONTEND = Path(__file__).resolve().parent
@@ -30,6 +31,7 @@ class Operator:
         self.lock = threading.Lock()
         self.audit_lock = threading.Lock()
         self.audit = {}
+        self.entries = {}
         self.starting = False
         self.start_error = ""
         self.stopping = set()
@@ -93,6 +95,10 @@ class Operator:
                             if guard["status"] == "KILLED":
                                 run["status"] = "STOPPING"
                         events = self.events(manifest)
+                        if status == "RUNNING":
+                            fresh = airlock.api(manifest, f"/entries?session_id={session}")["entries"]
+                            with self.audit_lock:
+                                self.entries[session] = fresh
                     except (OSError, ValueError, KeyError):
                         run["status"] = "UNAVAILABLE"
                         with self.audit_lock:
@@ -101,8 +107,10 @@ class Operator:
             if status != "STOPPED" and session in stopping:
                 run["status"] = "STOPPING"
             runs.append(run)
-        return {"run": current, "runs": runs, "events": events, "starting": starting, "startError": start_error,
-                "scenarios": SCENARIOS}
+        with self.audit_lock:
+            entries = list(self.entries.get(current["id"], ())) if current else []
+        return {"run": current, "runs": runs, "events": events, "entries": entries, "starting": starting,
+                "startError": start_error, "scenarios": SCENARIOS}
 
     def start(self, scenario):
         with self.lock:
@@ -199,6 +207,11 @@ class Handler(SimpleHTTPRequestHandler):
                 if session and snapshot["run"] is None:
                     return signin.response(self, {"error": "Managed session not found."}, 404)
                 return signin.response(self, snapshot)
+            if url.path == "/api/live":
+                session = parse_qs(url.query).get("session", [None])[0]
+                if session is not None and not valid_session(session):
+                    return signin.response(self, {"error": "Invalid session ID."}, 400)
+                return signin.response(self, self.server.live.snapshot(session))
             return signin.response(self, {"error": "Unknown endpoint."}, 404)
         if url.path == "/":
             self.path = "/index.html"
@@ -231,6 +244,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return signin.response(self, {"error": "Choose a supported rehearsal scenario."}, 400)
             if not self.server.operator.start(scenario):
                 return signin.response(self, {"error": "A rehearsal is already starting."}, 409)
+        elif self.path.startswith("/api/live/") and self.path.endswith("/stop"):
+            session = self.path.removeprefix("/api/live/").removesuffix("/stop")
+            if not valid_session(session):
+                return signin.response(self, {"error": "Invalid session ID."}, 400)
+            try:
+                self.server.live.kill(session)
+            except GatewayUnavailable:
+                return signin.response(self, {"error": "The local guard did not accept the stop."}, 502)
         elif self.path.startswith("/api/runs/") and self.path.endswith("/stop"):
             session = self.path.removeprefix("/api/runs/").removesuffix("/stop")
             try:
@@ -243,6 +264,12 @@ class Handler(SimpleHTTPRequestHandler):
             return signin.response(self, {"error": "Unknown endpoint."}, 404)
         signin.response(self, {"ok": True}, 202)
 
+    def end_headers(self):
+        # index.html names the hashed bundle; never let a browser keep a stale copy after a rebuild.
+        if self.command == "GET" and not self.path.startswith(("/assets/", "/api/", "/auth/")):
+            self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def list_directory(self, path):
         self.send_error(404)
         return None
@@ -254,8 +281,10 @@ def main():
     args = parser.parse_args()
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         server.operator = Operator()
+        server.live = LiveGateway()
         print("Local workspace sign-in code:", signin.code, flush=True)
         print(f"TrustAgent dashboard: http://127.0.0.1:{server.server_port}", flush=True)
+        print(f"Live hook agents from: {server.live.url}", flush=True)
         server.serve_forever()
 
 

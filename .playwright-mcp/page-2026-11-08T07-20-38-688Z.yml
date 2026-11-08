@@ -1,0 +1,55 @@
+- main [ref=e3]:
+  - navigation [ref=e4]:
+    - link "TrustAgent home" [ref=e5] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=e10]:
+      - link "Agents" [ref=e11] [cursor=pointer]:
+        - /url: "#agents"
+      - link "Console" [ref=e12] [cursor=pointer]:
+        - /url: "#console"
+      - link "Architecture" [ref=e13] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=e14] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=e15]:
+      - link "Sign in" [ref=e16] [cursor=pointer]:
+        - /url: "#signin"
+      - button "☾ Dark" [ref=e17] [cursor=pointer]
+      - generic [ref=e18]:
+        - generic [ref=e19]: Managed ready
+        - button "Workspace tools" [ref=e21] [cursor=pointer]
+  - generic [ref=e26]:
+    - link "TrustAgent home" [ref=e30] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - heading "Sign in to TrustAgent" [level=1] [ref=e35]
+    - paragraph [ref=e36]: Use the local workspace code to access managed sessions.
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - text: Workspace access code
+        - textbox "Workspace access code Use the code printed in your gateway terminal." [ref=e39]
+        - generic [ref=e40]: Use the code printed in your gateway terminal.
+      - button "Sign in" [ref=e41] [cursor=pointer]
+  - generic [ref=e42]:
+    - link "TrustAgent home" [ref=e43] [cursor=pointer]:
+      - /url: "#top"
+      - text: TrustAgent
+    - generic [ref=e48]:
+      - heading "Workspace" [level=2] [ref=e49]
+      - link "Agent console" [ref=e50] [cursor=pointer]:
+        - /url: "#console"
+      - link "Live demo" [ref=e51] [cursor=pointer]:
+        - /url: "#live"
+    - generic [ref=e52]:
+      - heading "Resources" [level=2] [ref=e53]
+      - link "Architecture" [ref=e54] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "FAQ" [ref=e55] [cursor=pointer]:
+        - /url: "#faq"
+    - generic [ref=e56]:
+      - heading "Account" [level=2] [ref=e57]
+      - link "Sign in" [ref=e58] [cursor=pointer]:
+        - /url: "#signin"
+      - link "Back to top ↑" [ref=e59] [cursor=pointer]:
+        - /url: "#top"
