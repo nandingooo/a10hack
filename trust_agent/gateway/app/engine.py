@@ -242,7 +242,11 @@ class Brain:
         if self.labeler.is_bait_target(op, target, json.dumps(args)):
             self.kill(session)
             verdict = self._v('stop', 'bait_touched', 'Canary policy triggered; managed run must terminate')
-        elif consequential and unresolved and channel != 'egress':
+        elif profile.get('strict') and consequential and unresolved and channel != 'egress':
+            # Only the isolated (strict) sandbox demands exposure reconciliation before
+            # the next sink. In hook-mode, Claude Code runs tools in parallel, so a
+            # lagging completion must NOT false-block benign work; the secret/untrusted
+            # -> exit and bait rules below still provide the real enforcement.
             verdict = self._v('block', 'unresolved_exposure', 'Earlier operation has no result; reconcile its exposure before consequential work')
         elif profile.get('strict') and op in ('WriteFile','DeleteFile','MoveFile','CopyFile') and not in_scope:
             verdict = self._v('block', 'workspace_boundary', 'Resource is outside the operator-authorized workspace')

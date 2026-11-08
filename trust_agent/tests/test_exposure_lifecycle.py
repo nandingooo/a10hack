@@ -43,10 +43,21 @@ def test_unknown_failure_is_conservatively_labeled(brain):
 
 
 def test_unresolved_read_blocks_sink_until_reconciled(brain):
+    # Exposure reconciliation is enforced only in the strict (isolated) sandbox;
+    # hook-mode must not false-block on a lagging completion (parallel tool calls).
+    brain.configure_session('strictsess', workspace_id='same-repository', workspace_root='/repo',
+                            repository_origin='cloned-repo', strict=True)
+    request(brain,'read',session='strictsess')
+    assert request(brain,'write','WriteFile','output.txt',session='strictsess')['rule'] == 'unresolved_exposure'
+    result(brain,'read',False,'none',session='strictsess')
+    assert request(brain,'write2','WriteFile','output.txt',session='strictsess')['decision'] == 'allow'
+
+
+def test_hookmode_does_not_block_on_unresolved_exposure(brain):
+    # Regression: a non-strict (hook-mode) session must allow consequential work
+    # even while a prior read's completion is still pending.
     request(brain,'read')
-    assert request(brain,'write','WriteFile','output.txt')['rule'] == 'unresolved_exposure'
-    result(brain,'read',False,'none')
-    assert request(brain,'write2','WriteFile','output.txt')['decision'] == 'allow'
+    assert request(brain,'write','WriteFile','output.txt')['decision'] == 'allow'
 
 
 def test_root_readme_is_untrusted(brain):
