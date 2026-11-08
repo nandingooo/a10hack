@@ -26,7 +26,7 @@ def invoke(event, tool, inp, session, tuid):
     return "allow"
 
 def run_sequence(name, steps, run_idx):
-    session = f"batt-{name}-{run_idx}"
+    session = f"batt-{os.getpid()}-{name}-{run_idx}"  # pid = fresh sessions per invocation (bait kills persist)
     results = []
     for tool, inp, expect in steps:
         tuid = f"t{next(_ids)}"
