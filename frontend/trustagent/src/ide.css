@@ -1,0 +1,133 @@
+/* Agent console — same type pair and tokens as styles.css */
+.ide { max-width: calc(var(--content) + 128px); margin: auto; padding: 32px clamp(12px, 2.4vw, 24px) 0; --pane: var(--background) }
+
+.ide button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: transparent; color: var(--text-primary);
+  font: 500 13px/1 var(--font-sans); white-space: nowrap;
+  transition: background-color .15s, border-color .15s;
+}
+.ide button:hover { background: var(--button) }
+.ide select {
+  height: 32px; padding: 0 8px; max-width: 100%;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--background); color: var(--text-primary); font: 13px var(--font-sans);
+}
+
+/* top bar */
+.ideBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0 }
+.ideBar h1 { margin-right: 4px; font-size: 16px; letter-spacing: -.02em }
+.runtime { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; font: var(--fs-label)/1 var(--font-mono); color: var(--text-faint) }
+.ide .runAgent { margin-left: auto; border-color: transparent; background: var(--accent); color: var(--on-accent) }
+.ide .runAgent:hover { background: var(--accent); filter: brightness(1.07) }
+
+/* session tabs */
+.browserTabs { display: flex; align-items: stretch; background: var(--surface); border: 1px solid var(--line); border-top: 0 }
+.sessionStrip { display: flex; flex: 1; min-width: 0; overflow-x: auto }
+.sessionTab { position: relative; flex: 1 0 200px; display: flex; min-width: 0; border-right: 1px solid var(--line) }
+.sessionTab[data-selected=true] { background: var(--pane); box-shadow: inset 0 -2px var(--accent) }
+.ide .sessionTab [role=tab] {
+  flex: 1; min-width: 0; display: grid; gap: 5px; justify-content: start; height: auto; padding: 12px 40px 12px 16px; text-align: left;
+  border: 0; border-radius: 0; background: transparent;
+}
+.ide .sessionTab [role=tab]:hover { background: color-mix(in srgb, var(--button) 60%, transparent) }
+.sessionTab strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ide .tabClose {
+  position: absolute; top: 50%; right: 8px; translate: 0 -50%;
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-faint);
+  opacity: 0; transition: opacity .12s, background-color .12s, color .12s;
+}
+.sessionTab:is(:hover, :focus-within, [data-selected=true]) .tabClose { opacity: 1 }
+.ide .tabClose:hover { background: var(--button); color: var(--text-primary) }
+.tabClose svg, .iconButton svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round }
+@media (hover: none) { .tabClose { opacity: 1 } }
+.sessionStrip strong { font-size: var(--fs-small); font-weight: 600; letter-spacing: -.01em }
+.sessionStrip span { font: var(--fs-label)/1.3 var(--font-mono); color: var(--text-faint) }
+.ide .newSessionTab { flex: none; width: 44px; height: auto; border: 0; border-radius: 0; font: 300 20px/1 var(--font-mono); color: var(--text-secondary) }
+.ide .newSessionTab:hover { color: var(--accent) }
+
+.tabChoice, .assignForm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-top: 0; font-size: var(--fs-small) }
+.tabChoice label, .assignForm label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary) }
+.assignForm strong { font-weight: 600 }
+.notice { display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 16px; border: 1px solid var(--line); border-top: 0; background: var(--surface) }
+.notice span { flex: 1; min-width: 0 }
+.notice.alert { background: color-mix(in srgb, var(--bad) 7%, var(--surface)) }
+.ide .iconButton { flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-faint) }
+.ide .iconButton:hover { background: var(--button); color: var(--text-primary) }
+
+/* layout */
+.ideLayout {
+  display: grid; height: max(560px, calc(100vh - 250px)); background: var(--pane);
+  border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); overflow: hidden;
+}
+.ideLayout.withInspector { grid-template-columns: minmax(0, 1fr) auto min(var(--inspector-w), calc(100% - 380px)) }
+.ideLeft { display: flex; flex-direction: column; min-width: 0; min-height: 0 }
+.terminalPane { flex: none; display: flex; flex-direction: column; height: min(var(--terminal-h), calc(100% - 180px)); min-height: 72px }
+.terminalPane .terminalOutput { flex: 1; min-height: 0; overflow: auto }
+
+/* sashes: a 1px line with a wider invisible grab area, highlighted on hover after a short delay like VS Code */
+.sash { position: relative; z-index: 2; flex: none; background: var(--line); touch-action: none; outline: none }
+.sash::before { content: ''; position: absolute; transition: background-color .1s }
+.sash.horizontal { height: 1px; cursor: row-resize }
+.sash.horizontal::before { inset: -4px 0 }
+.sash.vertical { width: 1px; cursor: col-resize }
+.sash.vertical::before { inset: 0 -4px }
+.sash:hover::before, .sash.active::before, .sash:focus-visible::before { background: var(--accent); transition-delay: .15s }
+.sash.horizontal:is(:hover, .active, :focus-visible)::before { inset: -1px 0 }
+.sash.vertical:is(:hover, .active, :focus-visible)::before { inset: 0 -1px }
+.sash.active::before, .sash:focus-visible::before { transition-delay: 0s }
+body.resizingRows, body.resizingRows * { cursor: row-resize !important; user-select: none }
+body.resizingCols, body.resizingCols * { cursor: col-resize !important; user-select: none }
+
+.taskGroup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--line) }
+.taskGroup strong { width: 100%; margin-bottom: 4px; font-size: 13px; font-weight: 600 }
+.ide .taskGroup button { height: 28px; padding: 0 10px; border-radius: 6px; font: 12px/1 var(--font-mono); color: var(--text-secondary) }
+.ide .taskGroup button[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-primary) }
+
+.filePath, .paneTitle { display: flex; align-items: center; gap: 8px; padding: 9px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font: var(--fs-mono)/1.4 var(--font-mono); color: var(--text-secondary) }
+.filePath strong { font-weight: 500; color: var(--text-primary) }
+.filePath span, .paneTitle span { margin-left: auto; font-size: var(--fs-label); font-weight: 400; color: var(--text-faint) }
+.paneTitle { font-weight: 500; color: var(--text-primary) }
+
+.codeView { flex: 1; min-height: 60px; overflow: auto; padding: 14px 0 }
+.sourceLine { display: flex; white-space: pre; font: 13px/1.8 var(--font-mono) }
+.sourceLine > span { flex: none; min-width: 48px; padding-right: 16px; text-align: right; color: var(--text-faint); user-select: none }
+.sourceLine code { padding-right: 20px; font: inherit }
+.literal { color: #e2b886 }
+.keyword { color: #f0946a }
+[data-theme="light"] .literal { color: #7a5518 }
+[data-theme="light"] .keyword { color: #a33d15 }
+
+.terminalOutput { padding: 14px 16px; font: var(--fs-mono)/1.9 var(--font-mono); color: var(--text-primary); overflow-wrap: anywhere }
+.terminalOutput time { color: var(--text-faint) }
+.resultText { padding-left: 18px; color: var(--text-secondary); white-space: pre-wrap }
+
+/* inspector */
+.ideActions:not([hidden]) { display: flex; flex-direction: column; min-width: 0; min-height: 0 }
+.ideActions details { padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-small); overflow-wrap: anywhere }
+.ideActions summary { cursor: pointer; font-weight: 500 }
+.ideActions details p { margin-top: 6px }
+.ideActions details code { font-size: 12px; color: var(--text-secondary) }
+.actionList { flex: 1; min-height: 0; overflow: auto }
+.actionItem { padding: 12px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere }
+.actionItem time { font: var(--fs-label)/1.3 var(--font-mono); color: var(--text-faint) }
+.actionItem div { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 4px }
+.actionItem div .verdict { flex: none; margin-top: 1px }
+.actionItem div strong { min-width: 0; overflow-wrap: anywhere }
+.actionItem strong { font: 500 13px/1.4 var(--font-mono) }
+.actionItem p { font-size: 13px; line-height: 1.5 }
+.actionItem code { display: block; margin-top: 4px; font-size: var(--fs-label); color: var(--text-faint) }
+
+.emptySession { display: grid; justify-items: center; gap: 20px; padding: 72px 16px 48px; background: var(--surface); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); color: var(--text-secondary); font-size: var(--fs-small); text-align: center }
+
+@media (max-width: 760px) {
+  .ideLayout { height: auto }
+  .ideLayout.withInspector { grid-template-columns: 1fr }
+  .ideLeft { height: max(520px, 78vh) }
+  .sash.vertical { display: none }
+  .ideActions:not([hidden]) { border-top: 1px solid var(--line); max-height: 70vh }
+  .runtime { display: none }
+  .ide .runAgent { margin-left: 0 }
+}
