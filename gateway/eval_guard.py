@@ -81,6 +81,39 @@ def deepset_cases() -> list[dict]:
              "source": "deepset/prompt-injections (test split)", "text": r["text"]} for i, r in enumerate(rows)]
 
 
+INJECAGENT = "https://raw.githubusercontent.com/uiuc-kang-lab/InjecAgent/main/data/"
+
+
+def injecagent_cases(n: int, seed: int = 0) -> list[dict]:
+    """InjecAgent (Zhan et al. 2024, MIT): attacker instructions inside simulated tool outputs.
+    Same sampled attacks with and without the benchmark's "IMPORTANT!!! Ignore all previous
+    instructions" prefix, plus harmless tool outputs and attack templates with the slot empty."""
+    import random
+    import ssl
+    import urllib.request
+
+    import certifi
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    get = lambda f: json.loads(urllib.request.urlopen(INJECAGENT + f, timeout=60, context=ctx).read())
+    rng = random.Random(seed)
+    src = "InjecAgent (uiuc-kang-lab/InjecAgent, MIT)"
+    out = []
+    for kind in ("dh", "ds"):  # direct harm, data stealing
+        base, enh = get(f"test_cases_{kind}_base.json"), get(f"test_cases_{kind}_enhanced.json")
+        idx = rng.sample(range(len(base)), min(n // 2, len(base)))
+        out += [{"id": f"ia-{kind}-b{i}", "category": "IA-attack-base", "label": 1, "source": src,
+                 "text": base[i]["Tool Response"]} for i in idx]
+        out += [{"id": f"ia-{kind}-e{i}", "category": "IA-attack-enhanced", "label": 1, "source": src,
+                 "text": enh[i]["Tool Response"]} for i in idx]
+        templates = sorted({c["Tool Response Template"] for c in base})
+        out += [{"id": f"ia-{kind}-t{j}", "category": "IA-template-empty", "label": 0, "source": src,
+                 "text": t.replace("<Attacker Instruction>", "")} for j, t in enumerate(templates)]
+    sims = sorted(get("attacker_simulated_responses.json").values())
+    out += [{"id": f"ia-sim{i}", "category": "IA-harmless-tool-output", "label": 0, "source": src,
+             "text": sims[i]} for i in rng.sample(range(len(sims)), min(n, len(sims)))]
+    return out
+
+
 def score(text: str) -> float:
     parts, _ = classifier.segments(text)  # same visible-limit and hidden-part handling as the gateway
     return max(classifier.model_score(p) for p in parts)
@@ -131,6 +164,8 @@ def main() -> None:
     ap.add_argument("--models", nargs="+", default=["86M"], choices=list(MODELS))
     ap.add_argument("--deepset", action="store_true")
     ap.add_argument("--cases", action="store_true", help="print every case's score")
+    ap.add_argument("--injecagent", type=int, default=0, metavar="N",
+                    help="add N sampled InjecAgent attacks (base + enhanced) and N harmless tool outputs")
     ap.add_argument("--window", type=int, default=classifier.WINDOW,
                     help="tokens per scoring window (gateway default 512)")
     a = ap.parse_args()
@@ -141,14 +176,26 @@ def main() -> None:
     models = [MODELS[m] for m in a.models]
     ours = load_cases()
     public = deepset_cases() if a.deepset else []
+    ia = injecagent_cases(a.injecagent) if a.injecagent else []
     for m in models:
         print(f"== {m}")
-        r1 = evaluate(m, ours, a.cases)
-        r2 = evaluate(m, public, False) if public else {"secs": 0}
-        print(f"   scored {len(ours) + len(public)} cases in {r1['secs'] + r2['secs']:.1f}s")
+        secs = evaluate(m, ours, a.cases)["secs"]
+        for extra in (public, ia):
+            if extra:
+                secs += evaluate(m, extra, False)["secs"]
+        print(f"   scored {len(ours) + len(public) + len(ia)} cases in {secs:.1f}s")
     report(models, ours, "AgentPass cases (gateway/eval/cases.jsonl + long documents)")
     if public:
         report(models, public, "Outside reference: deepset/prompt-injections test split")
+    if ia:
+        report(models, ia, "Outside reference: InjecAgent (attacks inside tool outputs)")
+        if a.cases:
+            for m in models:
+                missed = [c for c in ia if c["category"] == "IA-attack-base" and c[m] < classifier.THRESHOLD]
+                fa = [c for c in ia if not c["label"] and c[m] >= classifier.THRESHOLD]
+                print(f"\n{m}: sample misses / false alarms")
+                for c in missed[:3] + fa[:3]:
+                    print(f"  {'MISS' if c['label'] else 'FA  '} {c[m]:.3f} {c['text'][:150]!r}")
 
 
 if __name__ == "__main__":

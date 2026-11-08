@@ -72,9 +72,14 @@ Results from [eval_guard.py](eval_guard.py) on [eval/cases.jsonl](eval/cases.jso
 | **all injections (20)** | **3** | **7** |
 | E/F/G: false alarms on harmless text (12) | 1 | 1 (an article quoting "ignore all previous instructions") |
 | public `deepset/prompt-injections` test split, 60 injections / 56 harmless | 2 caught / 0 false alarms | 8 caught / 0 false alarms |
+| [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent) attacks inside tool outputs, plain wording (300) | 0 | 8 |
+| the same 300 attacks with "IMPORTANT!!! Ignore all previous instructions" in front | 20 | 300 |
+| InjecAgent harmless tool outputs (334) | 0 false alarms | 0 false alarms |
+
+ProtectAI's `deberta-v3-base-prompt-injection-v2` was also tested (`--models protectai`). It catches more of the plainly worded attacks (197/300), but it flags 223 of the 334 harmless tool outputs, so it doesn't tell them apart.
 | ~5,000 tokens on CPU | ~1.1 s | ~4.6 s |
 
-Run `python gateway/eval_guard.py --models 22M 86M --deepset --cases` to reproduce.
+Run `python gateway/eval_guard.py --models 22M 86M protectai --deepset --injecagent 300` to reproduce.
 
 To use the 22M instead, set `PROMPT_GUARD_MODEL=meta-llama/Llama-Prompt-Guard-2-22M`.
 
