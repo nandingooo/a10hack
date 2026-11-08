@@ -1,38 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { NODE_HEIGHT, NODE_WIDTH, taint, traceBack } from './provenanceGraph.js';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { nodePresentation, taint, traceBack } from './provenanceGraph.js';
+import ForceNetwork from './ForceNetwork.jsx';
 
 const BUILD_STEP_MS = 320;
 const TRACE_STEP_MS = 750;
 const NO_TRACE = { levels: [], edges: [], tainted: [] };
-const NODE_KIND = { source: 'read', secret: 'secret read', action: 'write', decision: 'decision' };
 
-function edgePath(from, to) {
-  const x1 = from.x + NODE_WIDTH, y1 = from.y + NODE_HEIGHT / 2;
-  const x2 = to.x, y2 = to.y + NODE_HEIGHT / 2;
-  const bend = Math.max(40, (x2 - x1) / 2);
-  return `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`;
-}
-
-function nodeClass(node, traceLevel, step) {
-  const classes = ['gnode', node.type === 'decision' ? 'decision ' + node.decision : 'taint-' + taint(node)];
-  const level = traceLevel.get(node.id);
-  if (level !== undefined && level <= step) classes.push(level === step ? 'frontier' : 'traced');
-  return classes.join(' ');
-}
-
-function GraphNode({ node, className, onSelect }) {
-  const caption = node.type === 'decision'
-    ? `${(node.decision || '').toUpperCase()} · ${node.rule || ''}`
-    : `${NODE_KIND[node.type]} · ${taint(node)}`;
-  const label = node.label.length > 22 ? node.label.slice(0, 21) + '…' : node.label;
-  return <g className={className} transform={`translate(${node.x},${node.y})`}
-    onClick={() => onSelect(node.id)} role="button" tabIndex={0}
-    onKeyDown={event => { if (event.key === 'Enter') onSelect(node.id); }}>
-    <title>{[node.target, node.rule, node.reason, node.basis].filter(Boolean).join('\n')}</title>
-    <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" />
-    <text x="10" y="16" className="gLabel">{label}</text>
-    <text x="10" y="31" className="gCaption">{caption}</text>
-  </g>;
+function GraphIcon({ name }) {
+  const paths = {
+    replay: 'M4 8a8 8 0 1 1-1 8M4 3v5h5',
+    trace: 'M5 6h5v5M10 6l-6 6m6 0h4v6m0-6 6 6',
+    minus: 'M5 12h14', plus: 'M5 12h14M12 5v14',
+    fit: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
+    search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+    close: 'M6 6l12 12M6 18 18 6',
+  };
+  return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
 
 /** Reveal nodes one by one (in creation order) each time `run` increments; Infinity = show all. */
@@ -68,13 +51,20 @@ function useTraceStep(trace, run) {
 }
 
 function TraceSummary({ graph, trace, step, focus }) {
-  if (!focus) return <p className="traceHint">Click a decision (or any node) to trace the context that could have reached it.</p>;
+  if (!focus) return <div className="traceHint"><strong>Follow the evidence</strong><p>Select a node to inspect its tags and trace the recorded context behind a decision.</p><small>Links include recorded provenance and inferred context.</small></div>;
   const done = step >= trace.levels.length - 1;
   const names = ids => ids.map(id => graph.byId.get(id)?.label).join(', ');
   const verdict = focus.decision?.toUpperCase();
+  const info = nodePresentation(focus);
   return <div className="traceSummary" aria-live="polite">
-    <strong>Tracing back from {focus.label}</strong>
-    <ol>{trace.levels.slice(1, step + 1).map((level, index) => <li key={index}><b>Hop {index + 1}</b> {names(level)}</li>)}</ol>
+    <div className="inspectorHeading"><strong>{focus.label}</strong><span>{focus.type === 'decision' ? 'Decision' : 'Resource'}</span></div>
+    <dl className="graphNodeDetails">
+      <dt>Resource</dt><dd><code>{info.resource}</code></dd>
+      <dt>{focus.type === 'decision' ? 'Verdict' : 'Tags'}</dt><dd>{focus.type === 'decision' ? info.caption : info.tags.join(' · ')}</dd>
+      <dt>{focus.type === 'decision' ? 'Context' : 'Observation'}</dt><dd>{info.detail}</dd>
+    </dl>
+    {focus.reason && <p className="decisionReason">{focus.reason}</p>}
+    {trace.levels.length > 1 && <details className="traceHops"><summary>Recorded context · {Math.max(0, trace.levels.length - 1)} hops</summary><ol>{trace.levels.slice(1, step + 1).map((level, index) => <li key={index}><b>Hop {index + 1}</b> {names(level)}</li>)}</ol></details>}
     {done && <p>
       {focus.type === 'decision' && <><b className={'verdict ' + verdict}>{verdict}</b> <code>{focus.rule}</code> · </>}
       {trace.tainted.length
@@ -82,7 +72,7 @@ function TraceSummary({ graph, trace, step, focus }) {
           const node = graph.byId.get(id);
           return <span key={id} className={'taintChip taint-' + taint(node)}>{node.label} · {taint(node)}</span>;
         })}</>
-        : 'no untrusted or secret context reached this node.'}
+        : focus.parents.length ? 'No risky labels among recorded ancestors.' : 'No recorded parent links.'}
     </p>}
   </div>;
 }
@@ -90,54 +80,57 @@ function TraceSummary({ graph, trace, step, focus }) {
 export default function AgentGraph({ graph, focusId, onFocus }) {
   const [replayRun, setReplayRun] = useState(0);
   const [traceRun, setTraceRun] = useState(0);
-  const [allEvidence, setAllEvidence] = useState(false);
+  const [allEvidence, setAllEvidence] = useState(true);
+  const [zoom, setZoom] = useState(100);
+  const [labels, setLabels] = useState(false);
+  const [query, setQuery] = useState('');
+  const network = useRef(null);
   const shown = useBuildReplay(graph.nodes.length, replayRun);
   // Re-trace only when the focus or the graph's shape changes, not on every 1 s poll.
-  const shape = graph.nodes.length + ':' + graph.edges.length;
+  const shape = graph.nodes.map(node => node.id).join('|') + ':' + graph.edges.map(edge => edge.id).join('|');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trace = useMemo(() => (focusId ? traceBack(graph, focusId) : NO_TRACE), [focusId, shape]);
   const step = useTraceStep(trace, traceRun);
   const traceLevel = new Map(trace.levels.flatMap((ids, level) => ids.map(id => [id, level])));
   const tracedEdge = new Map(trace.edges.map(edge => [edge.id, edge.level]));
-  const visible = node => node.order < shown;
   const focus = focusId ? graph.byId.get(focusId) : null;
-
-  const edges = graph.edges.filter(edge => {
-    const from = graph.byId.get(edge.from), to = graph.byId.get(edge.to);
-    if (!visible(from) || !visible(to)) return false;
-    if (tracedEdge.has(edge.id)) return true;
-    // A decision's evidence is the whole session context (conservative join); drawing every
-    // such edge for allowed actions hides the signal, so only denials show them by default.
-    return allEvidence || edge.kind !== 'evidence' || to.decision !== 'allow';
-  });
+  const matches = query.trim() ? graph.nodes.filter(node => [node.label, node.target, node.trust, node.sensitivity, node.rule, node.decision, node.bait ? 'bait' : ''].filter(Boolean).join(' ').toLowerCase().includes(query.trim().toLowerCase())) : [];
+  const select = id => { onFocus(id); network.current?.locate(id); setQuery(''); };
 
   return <div className="agentGraph">
     <div className="graphTools">
-      <button onClick={() => setReplayRun(run => run + 1)}>▶ Replay tree build</button>
-      <button disabled={!focus} onClick={() => setTraceRun(run => run + 1)}>↺ Replay traversal</button>
-      <label><input type="checkbox" checked={allEvidence} onChange={event => setAllEvidence(event.target.checked)} /> All evidence edges</label>
-      <span className="graphStats">{graph.nodes.length} nodes · {graph.edges.length} edges</span>
+      <div className="networkSearch">
+        <GraphIcon name="search" /><input type="search" aria-label="Find a file, tag or decision" placeholder="Find a file, tag or decision…" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setQuery(''); if (event.key === 'Enter' && matches[0]) select(matches[0].id); }} />
+        {query.trim() && <div className="networkResults" aria-label="Matching nodes">
+          {matches.length ? <><small>{matches.length} matching nodes{matches.length > 20 ? ' · first 20 shown' : ''}</small>{matches.slice(0, 20).map(node => <button key={node.id} onClick={() => select(node.id)}><i className={'nodeSwatch ' + (node.type === 'decision' ? 'decision ' + node.decision : 'taint-' + taint(node))} /><span><strong>{node.label}</strong><small>{node.target}</small></span><em>{node.type === 'decision' ? node.decision : taint(node)}</em></button>)}</> : <p>No matching nodes.</p>}
+        </div>}
+      </div>
+      <div className="graphReplayTools">
+        <button disabled={!graph.nodes.length} onClick={() => setReplayRun(run => run + 1)} title="Replay graph growth"><GraphIcon name="replay" />Replay</button>
+        <button disabled={!focus} onClick={() => setTraceRun(run => run + 1)} title="Replay the backward evidence trace"><GraphIcon name="trace" />Trace</button>
+      </div>
     </div>
     <div className="graphLegend" aria-hidden="true">
       <span className="taint-clean">trusted</span><span className="taint-untrusted">untrusted</span>
       <span className="taint-secret">secret</span><span className="taint-bait">bait</span>
       <span className="decision allow">allow</span><span className="decision block">block</span><span className="decision stop">stop</span>
+      <span className="graphStats">{graph.nodes.length} nodes · {graph.edges.length} links</span>
     </div>
-    {graph.nodes.length === 0 ? <div className="emptySession">No provenance yet. Reads and actions appear here as the agent works.</div>
-      : <div className="graphCanvas">
-        <svg width={graph.width} height={graph.height} role="img" aria-label="Provenance graph">
-          <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-            <path d="M0,0 L8,4 L0,8 z" /></marker></defs>
-          {edges.map(edge => {
-            const level = tracedEdge.get(edge.id);
-            const lit = level !== undefined && level <= step;
-            return <path key={edge.id} d={edgePath(graph.byId.get(edge.from), graph.byId.get(edge.to))}
-              pathLength="1" markerEnd="url(#arrow)" className={'gedge ' + edge.kind + (lit ? ' traced' : '')} />;
-          })}
-          {graph.nodes.filter(visible).map(node =>
-            <GraphNode key={node.id} node={node} className={nodeClass(node, traceLevel, step)} onSelect={onFocus} />)}
-        </svg>
-      </div>}
+    <div className="networkStage">
+      {graph.nodes.length === 0 ? <div className="graphEmpty"><GraphIcon name="trace" /><strong>Waiting for agent activity</strong><p>File reads and decisions will build the network here.</p></div>
+        : <ForceNetwork ref={network} graph={graph} focusId={focusId} onFocus={onFocus} shown={shown} traceLevel={traceLevel} tracedEdge={tracedEdge} step={step} allEvidence={allEvidence} labels={labels} onZoom={value => setZoom(Math.round(value * 100))} />}
+      <div className="networkOptions">
+        <label><input type="checkbox" checked={labels} onChange={event => setLabels(event.target.checked)} />Labels</label>
+        <label title="Include recorded context links for allowed decisions; these can include conservative inferences."><input type="checkbox" checked={allEvidence} onChange={event => setAllEvidence(event.target.checked)} />All context</label>
+      </div>
+      <div className="networkNavigation" role="group" aria-label="Graph navigation">
+        <button disabled={!graph.nodes.length || zoom <= 12} onClick={() => network.current?.zoom(0.8)} aria-label="Zoom out graph"><GraphIcon name="minus" /></button>
+        <output aria-label="Graph zoom">{zoom}%</output>
+        <button disabled={!graph.nodes.length || zoom >= 800} onClick={() => network.current?.zoom(1.25)} aria-label="Zoom in graph"><GraphIcon name="plus" /></button>
+        <button disabled={!graph.nodes.length} onClick={() => network.current?.fit()} aria-label="Fit graph" title="Fit graph (0)"><GraphIcon name="fit" /></button>
+      </div>
+    </div>
+    {focus && <button className="clearGraphSelection" onClick={() => onFocus(null)}><GraphIcon name="close" />Clear selection</button>}
     <TraceSummary graph={graph} trace={trace} step={step} focus={focus} />
   </div>;
 }

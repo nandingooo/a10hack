@@ -1,11 +1,4 @@
-// Pure provenance-graph model: gateway entries + decision events -> laid-out DAG,
-// plus the backward traversal the guard's verdict is based on. No React here.
-
-export const COLUMN_WIDTH = 210;
-export const ROW_HEIGHT = 58;
-export const NODE_WIDTH = 168;
-export const NODE_HEIGHT = 40;
-const PADDING = 24;
+// Pure audit model and backward evidence traversal. Spatial layout lives separately.
 
 const shortName = target => {
   const text = String(target ?? '');
@@ -19,8 +12,28 @@ const sourceType = (kind, sensitivity) => (kind === 'action' ? 'action' : sensit
 export function taint(node) {
   if (node.bait) return 'bait';
   if (node.sensitivity === 'secret') return 'secret';
-  if (node.trust === 'untrusted' || node.trust === 'unknown') return 'untrusted';
+  if (node.trust !== 'trusted') return 'untrusted';
   return 'clean';
+}
+
+/** Keep resource labels separate from an action's verdict or accumulated context. */
+export function nodePresentation(node) {
+  const decision = node.type === 'decision';
+  const inferred = /infer|proposed|inflight/.test(node.basis || '') || node.exposureStatus === 'unknown';
+  const exposure = inferred ? 'inferred exposure'
+    : node.exposureStatus === 'exposed' ? 'exposed'
+      : node.exposureStatus === 'none' ? 'no content exposed' : 'exposure not reported';
+  const tags = [node.trust || 'unknown trust', node.sensitivity || 'unknown sensitivity'];
+  if (node.bait) tags.push('bait');
+  return {
+    title: node.label || node.op || 'Resource',
+    resource: node.target || 'Resource not reported',
+    caption: decision ? `${(node.decision || 'unknown').toUpperCase()} · ${node.rule || 'rule not reported'}` : `Tags: ${tags.join(' · ')}`,
+    detail: decision ? (node.context
+      ? `Context: ${node.context.untrusted ? 'untrusted' : 'no untrusted tag'} · ${node.context.secret ? 'secret' : 'no secret tag'}`
+      : 'Context tags not reported') : `${node.op || 'Source'} · ${exposure}`,
+    tags: decision ? [] : tags,
+  };
 }
 
 function entryNode(entry) {
@@ -30,14 +43,16 @@ function entryNode(entry) {
     target: entry.target, op: entry.op, trust: labels.trust, sensitivity: labels.sensitivity,
     bait: Boolean(labels.bait), ts: entry.ts ?? 0, parents: [...new Set(entry.parents || [])],
     verdict: entry.verdict, rule: entry.rule, basis: entry.metadata?.basis,
+    exposureStatus: entry.metadata?.exposure_status, origin: entry.origin,
   };
 }
 
 function evidenceNode(item, fallbackTs) {
   return {
     id: item.id, type: sourceType('source', item.sensitivity), label: shortName(item.target),
-    target: item.target, op: 'ReadFile', trust: item.trust, sensitivity: item.sensitivity,
-    bait: false, ts: fallbackTs, parents: [...new Set(item.parents || [])], basis: item.basis,
+    target: item.target, op: item.op || (/^(?:[/\\]|[A-Za-z]:[/\\])/.test(item.target || '') ? 'ReadFile' : 'Source'), trust: item.trust, sensitivity: item.sensitivity,
+    bait: Boolean(item.bait), ts: fallbackTs, parents: [...new Set(item.parents || [])], basis: item.basis,
+    exposureStatus: item.exposure_status, origin: item.origin,
   };
 }
 
@@ -68,53 +83,23 @@ function collectNodes(entries, events) {
     add({
       id: 'decision:' + event.seq, type: 'decision', label: event.op || 'action', target: event.target,
       op: event.op, decision: event.decision, rule: event.rule, reason: event.reason, ts: event.ts ?? 0,
-      seq: event.seq, parents: [...new Set(parents.filter(Boolean))],
+      seq: event.seq, parents: [...new Set(parents.filter(Boolean))], context: event.context,
     });
   }
   return nodes;
 }
 
-function depths(nodes) {
-  const memo = new Map();
-  const visiting = new Set();
-  const depthOf = id => {
-    if (memo.has(id)) return memo.get(id);
-    if (visiting.has(id)) return 0; // cycle guard: provenance should be acyclic, but never hang
-    visiting.add(id);
-    const parents = nodes.get(id).parents.filter(p => nodes.has(p) && p !== id);
-    const depth = parents.length ? 1 + Math.max(...parents.map(depthOf)) : 0;
-    visiting.delete(id);
-    memo.set(id, depth);
-    return depth;
-  };
-  nodes.forEach((_, id) => depthOf(id));
-  return memo;
-}
-
-/** Build a column-per-depth layout. Returns new objects; inputs are not mutated. */
+/** Build recorded topology in creation order. Never invent links from proximity or time. */
 export function buildGraph(entries = [], events = []) {
   const nodes = collectNodes(entries, events);
-  const depth = depths(nodes);
   const ordered = [...nodes.values()].sort((a, b) => a.ts - b.ts || String(a.id).localeCompare(String(b.id)));
-  const rowsUsed = new Map();
-  const laidOut = ordered.map((node, order) => {
-    const column = depth.get(node.id);
-    const row = rowsUsed.get(column) || 0;
-    rowsUsed.set(column, row + 1);
-    return { ...node, order, column, row, x: PADDING + column * COLUMN_WIDTH, y: PADDING + row * ROW_HEIGHT };
-  });
-  const byId = new Map(laidOut.map(node => [node.id, node]));
-  const edges = laidOut.flatMap(node => node.parents.filter(p => byId.has(p) && p !== node.id).map(parent => ({
+  const model = ordered.map((node, order) => ({ ...node, order }));
+  const byId = new Map(model.map(node => [node.id, node]));
+  const edges = model.flatMap(node => node.parents.filter(p => byId.has(p) && p !== node.id).map(parent => ({
     id: parent + '->' + node.id, from: parent, to: node.id,
     kind: node.type === 'decision' ? 'evidence' : 'provenance',
   })));
-  const columns = Math.max(0, ...laidOut.map(n => n.column + 1));
-  const rows = Math.max(0, ...rowsUsed.values());
-  return {
-    nodes: laidOut, edges, byId,
-    width: PADDING * 2 + Math.max(0, columns - 1) * COLUMN_WIDTH + NODE_WIDTH,
-    height: PADDING * 2 + Math.max(0, rows - 1) * ROW_HEIGHT + NODE_HEIGHT,
-  };
+  return { nodes: model, edges, byId };
 }
 
 /**

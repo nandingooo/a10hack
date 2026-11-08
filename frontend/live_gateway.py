@@ -1,6 +1,6 @@
 """Read-mostly client for the standalone hook-mode guard (trust_agent/gateway/app/service.py).
 
-Real Claude Code sessions with the TrustAgent hook installed report to this service
+Claude Code and Codex sessions with the TrustAgent hook installed report to this service
 (AIRLOCK_URL, default http://127.0.0.1:8787). The dashboard lists them as live agents.
 """
 
@@ -55,7 +55,7 @@ class LiveGateway:
             if "HTTP 404" not in str(error):
                 raise
         # Older guard without /agents: only configured or killed sessions are visible.
-        return [dict(session_id=s["session_id"], status=s.get("status", "ACTIVE"), events=None,
+        return [dict(session_id=s["session_id"], status=s.get("status", "ACTIVE"), agent=s.get("agent", "unknown"), events=None,
                      last_ts=None, decisions=None, denials=None, managed=True, strict=False)
                 for s in self._call("/sessions")["sessions"]]
 

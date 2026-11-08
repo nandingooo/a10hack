@@ -14,7 +14,7 @@ async function request(path, { method = 'GET', signal } = {}) {
   return data;
 }
 
-/** Polls real hook-mode agents (Claude Code sessions reporting to the local guard). */
+/** Polls hook-mode agents reporting to the local guard, including Claude Code and Codex. */
 export function useLiveAgents(enabled, setProfile) {
   const [state, setState] = useState(null);
   const [session, setSession] = useState('');
@@ -67,6 +67,6 @@ export function relativeTime(ts, now = Date.now() / 1000) {
   return Math.round(seconds / 86400) + 'd ago';
 }
 
-/** An unkilled agent that produced an event in the last two minutes is treated as running. */
+/** Active hook sessions use recent activity as the existing liveness estimate. */
 export const isRunning = (agent, now = Date.now() / 1000) =>
-  agent.status !== 'KILLED' && Boolean(agent.last_ts) && now - agent.last_ts < 120;
+  ['ACTIVE', 'RUNNING'].includes(agent.status) && Boolean(agent.last_ts) && now - agent.last_ts < 120;
