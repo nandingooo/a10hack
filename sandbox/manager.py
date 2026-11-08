@@ -130,7 +130,7 @@ class SandboxManager:
                 detach=True,
                 network=network_name,
                 hostname="sandbox",
-                labels={**labels, LABEL_ROLE: "agent", LABEL_CREATED: str(int(created)),
+                labels={**labels, LABEL_ROLE: "agent", LABEL_CREATED: repr(created),  # full precision: the gateway compares it to its start time
                         LABEL_AGENTS: str(agents or "")},
                 environment={
                     **(env or {}),
@@ -266,6 +266,16 @@ class SandboxManager:
                 self.touch(session_id)
                 return session_id
         return None
+
+    def created_at(self, session_id: str) -> float | None:
+        """Creation time (epoch seconds). The gateway uses it to tell a session it has never
+        seen from one it forgot in a restart."""
+        container_name, _ = self._names(session_id)
+        try:
+            label = self.client.containers.get(container_name).labels.get(LABEL_CREATED)
+        except NotFound:
+            return None
+        return float(label) if label else None
 
     def touch(self, session_id: str) -> None:
         """Record activity so the idle timeout restarts."""

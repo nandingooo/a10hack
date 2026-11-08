@@ -42,6 +42,9 @@ class FakeManager:
     def reap(self, max_age=None, idle_timeout=None):
         return [{"session_id": s, "reason": "test"} for s in list(self.sessions)]
 
+    def created_at(self, session_id):
+        return 1700000000.0 if session_id in self.sessions else None
+
     def resolve_token(self, token):
         return next((s for s, i in self.sessions.items() if i.session_token == token), None)
 
@@ -73,7 +76,8 @@ def test_lifecycle(client):
     assert "session_token" not in client.get("/sessions/s1", headers=AUTH).json()
     assert [s["session_id"] for s in client.get("/sessions", headers=AUTH).json()] == ["s1"]
 
-    assert client.post("/sessions/resolve", json={"token": token}, headers=AUTH).json() == {"session_id": "s1"}
+    assert client.post("/sessions/resolve", json={"token": token}, headers=AUTH).json() == \
+        {"session_id": "s1", "created_at": 1700000000.0}
     assert client.post("/sessions/resolve", json={"token": "nope"}, headers=AUTH).status_code == 404
 
     assert client.delete("/sessions/s1", headers=AUTH).status_code == 204

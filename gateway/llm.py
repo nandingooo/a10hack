@@ -10,6 +10,8 @@ Before forwarding it:
   * removes tools that run on the provider's servers (web search, web fetch, code
     execution) and remote MCP servers, since those would reach the outside world
     without passing the gateway;
+  * refuses requests with URL-sourced content (images/documents the provider would download
+    from an agent-chosen URL, an exfiltration path around R2/R3);
   * applies decide_llm (a decoy read blocks model calls too) and logs metadata only.
 """
 
@@ -66,13 +68,27 @@ def sanitize(body: dict) -> tuple[dict, list[str]]:
     return body, removed
 
 
+def url_sources(node) -> int:
+    """Count content blocks the provider would download itself ("source": {"type": "url", ...}
+    on image/document blocks, at any depth, e.g. inside tool results). The URL is chosen by
+    the agent, so it is an outbound request that never passes R2/R3: an agent could put
+    secrets in the query string."""
+    if isinstance(node, dict):
+        src = node.get("source")
+        own = 1 if isinstance(src, dict) and src.get("type") == "url" else 0
+        return own + sum(url_sources(v) for v in node.values())
+    if isinstance(node, list):
+        return sum(url_sources(v) for v in node)
+    return 0
+
+
 async def session_async(request: Request) -> SessionState:
     """Like gw.session, but cached tokens skip the thread-pool hop (hot path on every call)."""
     header = request.headers.get("authorization", "")
     token = header.removeprefix("Bearer ").strip()
     session_id = gw._token_cache.get(token)
     if session_id:
-        return gw.sessions.setdefault(session_id, SessionState(session_id))
+        return gw.get_session(session_id)
     return await run_in_threadpool(gw.session, header)
 
 
@@ -97,6 +113,12 @@ async def llm_proxy(path: str, request: Request):
     meta = {"path": path, "model": body.get("model"), "stream": bool(body.get("stream")),
             "messages": len(body.get("messages") or []), "removed": removed}
     d = decide_llm(state)
+    if d.decision == "allow" and (n := url_sources(body)):
+        # The URL itself is not logged: it may carry the data being smuggled out.
+        meta["url_sources"] = n
+        d = gw.Decision("block", "llm-url-source",
+                        "content with a URL source would make the provider fetch an agent-chosen URL; "
+                        "fetch it with fetch_url and send the content inline", alert=True)
     if d.decision != "allow":
         gw.record(state, "llm_call", meta, d)
         gw.enforce(d)

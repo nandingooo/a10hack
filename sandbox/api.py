@@ -6,7 +6,7 @@ Callers (gateway, dashboard backend) must send `Authorization: Bearer $SANDBOX_A
   GET    /sessions                 list sandboxes
   GET    /sessions/{session_id}    one sandbox's status
   DELETE /sessions/{session_id}    destroy a sandbox
-  POST   /sessions/resolve         {"token": ...} -> {"session_id": ...}  (gateway: who sent this request?)
+  POST   /sessions/resolve         {"token": ...} -> {"session_id", "created_at"}  (gateway: who sent this request?)
   POST   /sessions/{session_id}/touch   mark activity (resolve does this too)
   POST   /reap                     run cleanup now
   GET    /healthz                  no auth
@@ -117,7 +117,7 @@ def resolve(body: ResolveToken, mgr: SandboxManager = Depends(get_manager)):
     session_id = mgr.resolve_token(body.token)
     if session_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown token")
-    return {"session_id": session_id}
+    return {"session_id": session_id, "created_at": mgr.created_at(session_id)}
 
 
 @app.post("/reap", dependencies=[Depends(require_key)])

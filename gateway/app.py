@@ -19,6 +19,8 @@ Config (env):
   RISK_URL                           optional risk layer; can only make decisions stricter
   OFFLINE=1                          simulate fetch/send (default; demo uses made-up hosts). OFFLINE=0
                                      sends for real, pinned to the vetted IP (see egress.py)
+  STATE_FILE                         where session tags are saved so a restart doesn't reset them
+                                     (run.sh: a volume). Unset = memory only.
 """
 
 from __future__ import annotations
@@ -27,7 +29,9 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import ipaddress
@@ -52,6 +56,8 @@ APPROVED = json.loads(os.getenv("APPROVED_DESTINATIONS", "{}"))
 RISK_URL = os.getenv("RISK_URL")
 OFFLINE = os.getenv("OFFLINE", "1") == "1"
 MAX_READ_BYTES = 256 * 1024
+STATE_FILE = Path(os.environ["STATE_FILE"]) if os.getenv("STATE_FILE") else None
+STARTED_AT = time.time()
 
 if not os.getenv("GATEWAY_ADMIN_KEY"):
     log.warning("GATEWAY_ADMIN_KEY not set; generated one for this run: %s", ADMIN_KEY)
@@ -86,6 +92,58 @@ sessions: dict[str, SessionState] = {}
 events: dict[str, list[dict]] = {}
 alerts: list[dict] = []
 _token_cache: dict[str, str] = {}
+_created: dict[str, float] = {}  # session id -> sandbox creation time (from the sandbox API)
+_state_lock = threading.Lock()
+
+
+# ---------- session state that survives restarts ----------
+# Taint must only ever get stricter. If the gateway restarted and forgot a session, that
+# session would start over as trusted/public, so: tags are saved to STATE_FILE after every
+# change, and a session that existed before this process started but has no saved state
+# starts locked (untrusted + secret: nothing leaves it, risky actions are blocked).
+
+def _load_saved() -> dict[str, SessionState]:
+    if not STATE_FILE or not STATE_FILE.exists():
+        return {}
+    try:
+        return {sid: SessionState(**d) for sid, d in json.loads(STATE_FILE.read_text()).items()}
+    except (OSError, ValueError, TypeError) as e:
+        log.error("cannot read %s, sessions from before this start will be locked: %s", STATE_FILE, e)
+        return {}
+
+
+def save_state() -> None:
+    if not STATE_FILE:
+        return
+    with _state_lock:
+        data = json.dumps({sid: asdict(s) for sid, s in list(sessions.items())})
+        tmp = STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(data)
+        os.replace(tmp, STATE_FILE)
+
+
+def get_session(session_id: str) -> SessionState:
+    if session_id in sessions:
+        return sessions[session_id]
+    with _state_lock:
+        if session_id in sessions:
+            return sessions[session_id]
+        created = _created.get(session_id, 0.0)  # unknown creation time counts as "before"
+        state = SessionState(session_id)
+        if created < STARTED_AT:
+            state.absorb("gateway-restart", {"trust": "untrusted", "sensitivity": "secret"})
+        sessions[session_id] = state
+    if created < STARTED_AT:
+        record(state, "session_restored", {"created_at": created or None},
+               Decision("block", "R5-state-lost",
+                        "session predates this gateway start and its tags were not saved; locked", alert=True))
+    save_state()
+    return state
+
+
+def absorb(state: SessionState, source: str, tags: dict) -> None:
+    state.absorb(source, tags)
+    save_state()
 
 
 # ---------- identity ----------
@@ -101,7 +159,9 @@ def resolve_token(token: str) -> str | None:
         raise HTTPException(503, "cannot verify session")
     if r.status_code != 200:
         return None
-    _token_cache[token] = r.json()["session_id"]
+    data = r.json()
+    _created[data["session_id"]] = float(data.get("created_at") or 0)
+    _token_cache[token] = data["session_id"]
     return _token_cache[token]
 
 
@@ -110,7 +170,7 @@ def session(authorization: str = Header("")) -> SessionState:
     session_id = resolve_token(token) if token else None
     if not session_id:
         raise HTTPException(401, "unknown session token")
-    return sessions.setdefault(session_id, SessionState(session_id))
+    return get_session(session_id)
 
 
 def admin(request: Request, authorization: str = Header("")) -> None:
@@ -258,7 +318,7 @@ def read_file(body: ReadFile, state: SessionState = Depends(session)):
     rel = str(p.relative_to(FILES_DIR))
     content = p.read_bytes()[:MAX_READ_BYTES].decode(errors="replace")
     tags = screen(state, "read_file", rel, content, normalize_tags(load_tags().get(rel)))
-    state.absorb(f"file:{rel}", tags)
+    absorb(state, f"file:{rel}", tags)
     if tags["bait"]:
         d = Decision("allow", "R4-bait", "DECOY READ: nothing may leave this session now", alert=True)
     else:
@@ -280,7 +340,7 @@ def fetch_url(body: Fetch, state: SessionState = Depends(session)):
         return_ = {"url": body.url, "status": status, "content": raw.decode(errors="replace")}
         if "location" in hdrs:
             return_["redirect_to"] = hdrs["location"]  # not followed; fetching it is re-checked
-    state.absorb(f"url:{body.url}", screen(state, "fetch_url", body.url, return_["content"], WEB_CONTENT))
+    absorb(state, f"url:{body.url}", screen(state, "fetch_url", body.url, return_["content"], WEB_CONTENT))
     return return_
 
 
@@ -324,6 +384,7 @@ def admin_alerts():
     return alerts
 
 
+sessions.update(_load_saved())
 classifier.warm()  # no-op unless PROMPT_GUARD=1
 
 # Model API proxy and MCP server register their routes on `app`.

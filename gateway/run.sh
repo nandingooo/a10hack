@@ -22,6 +22,7 @@ docker run -d --name a10-gateway \
   -e PROMPT_GUARD ${PROMPT_GUARD_THRESHOLD:+-e PROMPT_GUARD_THRESHOLD} ${PROMPT_GUARD_MAX_CHARS:+-e PROMPT_GUARD_MAX_CHARS} \
   ${PROMPT_GUARD_WINDOW:+-e PROMPT_GUARD_WINDOW} \
   -v a10-hf-cache:/hf \
+  -v a10-gateway-state:/state -e STATE_FILE=/state/sessions.json \
   ${LLM_UPSTREAM:+-e LLM_UPSTREAM} ${ANTHROPIC_API_KEY:+-e ANTHROPIC_API_KEY} \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
   a10-gateway:latest >/dev/null
