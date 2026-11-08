@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 
 export const MANAGED = import.meta.env.MODE !== 'demo';
 
-async function request(path, method = 'GET', signal) {
+async function request(path, { method = 'GET', signal, body } = {}) {
+  const headers = { 'X-Airlock-Demo': '1' };
+  if (body) headers['Content-Type'] = 'application/json';
   const response = await fetch('/api/' + path, {
-    method, signal, headers: { 'X-Airlock-Demo': '1' }, cache: 'no-store',
+    method, signal, headers, body: body && JSON.stringify(body), cache: 'no-store',
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -36,7 +38,7 @@ export function useManagedGateway(enabled, setProfile) {
     async function refresh() {
       try {
         const query = session ? '?session=' + encodeURIComponent(session) : '';
-        const snapshot = await request('state' + query, 'GET', controller.signal);
+        const snapshot = await request('state' + query, { signal: controller.signal });
         if (!controller.signal.aborted) {
           setState(snapshot);
           setError('');
@@ -64,7 +66,7 @@ export function useManagedGateway(enabled, setProfile) {
     setSession(id);
   }
 
-  async function command(action) {
+  async function command(action, scenario) {
     if (!enabled) {
       location.hash = 'signin';
       return;
@@ -75,7 +77,9 @@ export function useManagedGateway(enabled, setProfile) {
     setPending(true);
     setCommandError('');
     try {
-      await request(action === 'start' ? 'start' : 'runs/' + encodeURIComponent(id) + '/stop', 'POST');
+      await request(action === 'start' ? 'start' : 'runs/' + encodeURIComponent(id) + '/stop', {
+        method: 'POST', body: action === 'start' && scenario ? { scenario } : undefined,
+      });
       if (action === 'start') setSession('');
       refreshNow(current => current + 1);
     } catch (error) {
@@ -104,7 +108,7 @@ export const eventTime = event => new Date(event.ts * 1000).toLocaleTimeString()
 
 export function previewState(state) {
   const run = state?.run;
-  const name = 'Session ' + run?.id.slice(0, 8);
+  const name = run?.scenarioTitle || 'Managed session';
   return state && {
     id: run?.id.slice(0, 8),
     running: run?.status === 'RUNNING',

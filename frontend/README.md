@@ -11,7 +11,16 @@ npm --prefix frontend run build
 python3 frontend/managed.py
 ```
 
-Open <http://127.0.0.1:8798>. Sign in with the workspace code printed by the dashboard server. In **Console**, use **Run rehearsal** to launch the backend's scripted sandbox. The audit shows gateway decisions, reasons, evidence, execution results, and exposure status. **Stop run** revokes the selected session and uses the managed supervisor to stop its containers. Its archived audit remains available in the console.
+Open <http://127.0.0.1:8798>. Sign in with the workspace code printed by the dashboard server. In **Console**, choose a **Rehearsal scenario** and click **Run rehearsal**. Each scenario uses the managed sandbox and records real gateway decisions from scripted tool calls.
+
+| Scenario | What to show in the audit |
+|---|---|
+| Secret upload | Show the allowed `.env` read, then open **Evidence** on the `secret_upload` block. |
+| Destructive command | Show the untrusted README in the `untrusted_destructive` block, then the successful read of the intact rehearsal file. |
+| Workspace boundary | Compare the allowed write under `/work` with the `workspace_boundary` denial under `/tmp`. |
+| Canary stop | Show `bait_touched` and the session becoming **Stopped** automatically. |
+
+Use **Stop run** for the first three scenarios. The managed supervisor verifies container shutdown, and the archived audit remains available in the session selector.
 
 Sessions launched with `python3 trust_agent/airlock.py run` from the same checkout also appear in the session selector. See the [managed harness guide](../trust_agent/README.md) for launching and signing in to Claude Code. The dashboard's workspace code grants local operator access. Claude Code signs in separately inside its sandbox.
 

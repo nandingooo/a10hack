@@ -19,6 +19,10 @@ FRONTEND = Path(__file__).resolve().parent
 HARNESS = FRONTEND.parent / "trust_agent"
 sys.path.insert(0, str(HARNESS))
 import airlock
+from sandbox.demo_agent import DEFAULT_REHEARSAL, REHEARSALS
+
+
+SCENARIOS = [{"id": key, "title": case.title, "description": case.description} for key, case in REHEARSALS.items()]
 
 
 class Operator:
@@ -76,7 +80,9 @@ class Operator:
         for created, manifest in manifests:
             session = manifest["session_id"]
             status = manifest["status"]
-            run = {"id": session, "status": status, "created": created, "stopError": stop_errors.get(session, "")}
+            case = REHEARSALS.get(manifest.get("rehearsal"))
+            run = {"id": session, "status": status, "created": created, "stopError": stop_errors.get(session, ""),
+                   "scenarioTitle": case.title if case else "Managed session"}
             if session == selected:
                 if status in ("RUNNING", "STOPPED"):
                     try:
@@ -95,16 +101,18 @@ class Operator:
             if status != "STOPPED" and session in stopping:
                 run["status"] = "STOPPING"
             runs.append(run)
-        return {"run": current, "runs": runs, "events": events, "starting": starting, "startError": start_error}
+        return {"run": current, "runs": runs, "events": events, "starting": starting, "startError": start_error,
+                "scenarios": SCENARIOS}
 
-    def start(self):
+    def start(self, scenario):
         with self.lock:
             if self.starting:
-                return
+                return False
             self.starting, self.start_error = True, ""
-        threading.Thread(target=self.launch_rehearsal, daemon=True).start()
+        threading.Thread(target=self.launch_rehearsal, args=(scenario,), daemon=True).start()
+        return True
 
-    def launch_rehearsal(self):
+    def launch_rehearsal(self, scenario):
         try:
             with socket.socket() as port_socket:
                 port_socket.bind(("127.0.0.1", 0))
@@ -112,8 +120,7 @@ class Operator:
             subprocess.run([
                 sys.executable, str(HARNESS / "airlock.py"), "run",
                 "--repo", str(HARNESS / "experiments/live_demo_repo"),
-                "--port", str(port), "--detach", "--",
-                "python3", "/opt/airlock/sandbox/demo_agent.py",
+                "--port", str(port), "--detach", "--rehearsal", scenario,
             ], check=True, timeout=1500)
         except (OSError, subprocess.SubprocessError) as error:
             print(f"Managed rehearsal failed: {error}", file=sys.stderr, flush=True)
@@ -210,7 +217,20 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.authorized():
             return signin.response(self, {"error": "Sign in with the local workspace code."}, 401)
         if self.path == "/api/start":
-            self.server.operator.start()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 <= length <= 1024:
+                    raise ValueError("Invalid request length")
+                payload = json.loads(self.rfile.read(length)) if length else {"scenario": DEFAULT_REHEARSAL}
+                if not isinstance(payload, dict) or not isinstance(payload.get("scenario"), str):
+                    raise ValueError("Expected a scenario ID")
+                scenario = payload["scenario"]
+                if scenario not in REHEARSALS:
+                    raise ValueError("Unknown scenario")
+            except (ValueError, UnicodeError):
+                return signin.response(self, {"error": "Choose a supported rehearsal scenario."}, 400)
+            if not self.server.operator.start(scenario):
+                return signin.response(self, {"error": "A rehearsal is already starting."}, 409)
         elif self.path.startswith("/api/runs/") and self.path.endswith("/stop"):
             session = self.path.removeprefix("/api/runs/").removesuffix("/stop")
             try:

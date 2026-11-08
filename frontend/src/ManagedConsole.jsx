@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { canStop, eventTime, runStatus } from './managedGateway.js';
 import './ide.css';
 
@@ -25,6 +25,9 @@ function AuditEvent({ event }) {
 }
 
 export default function ManagedConsole({ state, error, command, select, pending, session, signedIn }) {
+  const [choice, setChoice] = useState('');
+  const scenarios = state?.scenarios || [];
+  const scenario = scenarios.find(item => item.id === choice) || scenarios[0];
   const run = state?.run;
   const message = error || run?.stopError || state?.startError;
   const changing = Boolean(session && run?.id !== session);
@@ -32,7 +35,8 @@ export default function ManagedConsole({ state, error, command, select, pending,
   return <section className="ide managedConsole" aria-label="Managed agent console">
     <header className="ideBar">
       <h1>Agent console</h1><span className="runtime">Managed sandbox</span>
-      <button className="runAgent" disabled={pending || state?.starting} onClick={() => command('start')}>
+      <button className="runAgent" disabled={pending || state?.starting || (signedIn && !scenario)}
+        onClick={() => command('start', scenario?.id)}>
         {state?.starting ? 'Starting rehearsal…' : '▶ Run rehearsal'}
       </button>
       <button disabled={pending || changing || !canStop(run)} onClick={() => command('stop')}>
@@ -42,10 +46,18 @@ export default function ManagedConsole({ state, error, command, select, pending,
     {message && <div className="notice alert" role="alert">{message}</div>}
     {!signedIn ? <div className="emptySession"><a href="#signin">Sign in with the workspace code</a></div>
       : <div className="managedAudit">
+        {scenario && <div className="managedRehearsal">
+          <label>Rehearsal scenario <select value={scenario.id} onChange={event => setChoice(event.target.value)}>
+            {scenarios.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+          </select></label>
+          <p>{scenario.description}</p>
+        </div>}
         <div className="paneTitle managedSession">
           <label>Session <select aria-label="Session" value={session || run?.id || ''} onChange={event => select(event.target.value)}>
             {!state?.runs.length && <option value="">No managed sessions</option>}
-            {state?.runs.map(item => <option key={item.id} value={item.id}>{item.id.slice(0, 8)} · {runStatus(item.status)}</option>)}
+            {state?.runs.map(item => <option key={item.id} value={item.id}>
+              {item.scenarioTitle} · {item.id.slice(0, 8)} · {runStatus(item.status)}
+            </option>)}
           </select></label>
           <span role="status">{changing ? 'Loading session…' : run ? runStatus(run.status) : state?.starting ? 'Launching…' : 'Waiting'}</span>
         </div>

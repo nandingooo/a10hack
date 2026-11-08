@@ -123,7 +123,9 @@ body.resizingCols, body.resizingCols * { cursor: col-resize !important; user-sel
 .emptySession { display: grid; justify-items: center; gap: 20px; padding: 72px 16px 48px; background: var(--surface); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); color: var(--text-secondary); font-size: var(--fs-small); text-align: center }
 .managedAudit { background: var(--surface); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); overflow: hidden }
 .managedSession { min-height: 46px; height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 16px }
-.managedSession select { margin-left: 6px; max-width: 100%; background: var(--surface); color: var(--text-primary); border: 1px solid var(--line); border-radius: 4px }
+.managedSession select, .managedRehearsal select { margin-left: 6px; max-width: 100%; background: var(--surface); color: var(--text-primary); border: 1px solid var(--line); border-radius: 4px }
+.managedRehearsal { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-small) }
+.managedRehearsal p { color: var(--text-secondary) }
 .managedActions { padding: 0 16px; max-height: 65vh; overflow: auto }
 .managedActions .actionItem { overflow-wrap: anywhere }
 .managedActions details { margin: 8px 0 }

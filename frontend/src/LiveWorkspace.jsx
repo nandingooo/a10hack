@@ -140,7 +140,7 @@ function ScreenRecording({ state, error, command, signedIn, control }) {
           <div className="appCenter">
             <div className="appActions">
               <a href="#console">Open console <span aria-hidden="true">↗</span></a>
-              {MANAGED ? <button disabled={control.disabled} onClick={() => command(control.action)}>{control.label}</button>
+              {MANAGED ? control.visible && <button disabled={control.disabled} onClick={() => command('stop')}>{control.label}</button>
                 : <button disabled={!state || !!error} onClick={() => command(state.running ? 'stop' : 'start')}>{state?.running ? '■ Stop run' : '▶ Run again'}</button>}
               <a href="#architecture">How it works</a>
             </div>
@@ -164,9 +164,9 @@ export function LiveWorkspace({ full = false, ...props }) {
   const stopping = state?.run?.status === 'STOPPING';
   const stop = canStop(state?.run);
   const control = {
-    action: stop ? 'stop' : 'start',
-    disabled: Boolean(pending || stopping || state?.starting || (session && state?.run?.id !== session)),
-    label: stopping ? 'Stopping…' : stop ? '■ Stop run' : state?.starting ? 'Starting…' : '▶ Run rehearsal',
+    visible: stop || stopping,
+    disabled: Boolean(pending || stopping || (session && state?.run?.id !== session)),
+    label: stopping ? 'Stopping…' : '■ Stop run',
     starting: state?.starting,
   };
   return <section id="live" className="workspace">
