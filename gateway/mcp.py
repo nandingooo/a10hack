@@ -14,7 +14,7 @@ import json
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
-import app as gw
+import server as gw
 from policy import SessionState
 
 PROTOCOL_VERSION = "2025-06-18"

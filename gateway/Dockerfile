@@ -9,8 +9,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt \
  && mkdir /hf /state && chown gateway /hf /state
 # Model cache; run.sh mounts a named volume here so the model is downloaded once.
 ENV HF_HOME=/hf
-COPY policy.py egress.py classifier.py app.py llm.py mcp.py /app/
+COPY policy.py egress.py classifier.py server.py llm.py mcp.py /app/
 USER gateway
 WORKDIR /app
 EXPOSE 8080
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]

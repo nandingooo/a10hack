@@ -26,7 +26,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-import app as gw
+import server as gw
 from policy import SessionState, decide_llm
 
 UPSTREAM = os.getenv("LLM_UPSTREAM", "https://api.anthropic.com").rstrip("/")

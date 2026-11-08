@@ -14,7 +14,7 @@ sys.path.insert(0, str(HERE))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-import app as gw  # noqa: E402
+import server as gw  # noqa: E402
 from policy import SessionState, decide_action, decide_egress  # noqa: E402
 
 APPROVED = {"api.internal.example": "sensitive"}

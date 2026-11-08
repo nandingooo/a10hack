@@ -96,7 +96,7 @@ Step 2 scores the workspace files (or any files you pass), to check `PROMPT_GUAR
 
 ### Josh: storage
 
-The gateway keeps three in-memory stores in [app.py](app.py): `sessions`, `events` and `alerts`. Replace them with the database. They hold metadata only, never file contents or model messages.
+The gateway keeps three in-memory stores in [server.py](server.py): `sessions`, `events` and `alerts`. Replace them with the database. They hold metadata only, never file contents or model messages.
 
 Until then, session tags (not events or alerts) are saved to `STATE_FILE` after every change; `run.sh` keeps it in the `a10-gateway-state` volume, so restarting the gateway doesn't reset a session's taint. The sandbox API's `/sessions/resolve` also returns `created_at`; a session created before the gateway started that has no saved tags starts locked (R5). The database must keep this guarantee: tags never get less strict, including across restarts.
 
@@ -170,7 +170,7 @@ It expects `{"decision": "allow" | "ask" | "block", "reason": "..."}` back:
 |---|---|
 | [policy.py](policy.py) | tags, session state, rules R1–R4, model-call rule (no I/O) |
 | [egress.py](egress.py) | R0 address checks and pinned outbound requests |
-| [app.py](app.py) | tools, identity, logging, risk hook, admin API |
+| [server.py](server.py) | tools, identity, logging, risk hook, admin API |
 | [classifier.py](classifier.py), [score_files.py](score_files.py) | injection classifier on the read path; scoring files to pick a threshold |
 | [llm.py](llm.py) | streaming model proxy |
 | [mcp.py](mcp.py) | MCP server for the tools |
