@@ -10,10 +10,13 @@ export APPROVED_DESTINATIONS GATEWAY_ADMIN_KEY OFFLINE
 : "${OFFLINE:=1}"
 : "${PROMPT_GUARD:=0}"
 export PROMPT_GUARD
-if [ "$PROMPT_GUARD" = "1" ] && [ -z "$HF_TOKEN" ] && ! docker volume inspect a10-hf-cache >/dev/null 2>&1; then
-  echo "PROMPT_GUARD=1 needs HF_TOKEN the first time (gated model, accept the Llama license on HF)" >&2
-  exit 1
-fi
+# The default classifier (ProtectAI) is public. Only the Llama Prompt Guard models are gated.
+case "$PROMPT_GUARD_MODEL" in meta-llama/*)
+  if [ "$PROMPT_GUARD" = "1" ] && [ -z "$HF_TOKEN" ] && ! docker volume inspect a10-hf-cache >/dev/null 2>&1; then
+    echo "$PROMPT_GUARD_MODEL is gated: set HF_TOKEN for the first download (accept the Llama license on HF)" >&2
+    exit 1
+  fi ;;
+esac
 docker build -q --build-arg PROMPT_GUARD="$PROMPT_GUARD" -t a10-gateway:latest . >/dev/null
 docker rm -f a10-gateway >/dev/null 2>&1 || true
 docker run -d --name a10-gateway \
@@ -25,6 +28,7 @@ docker run -d --name a10-gateway \
   ${RISK_URL:+-e RISK_URL} \
   -e PROMPT_GUARD ${PROMPT_GUARD_THRESHOLD:+-e PROMPT_GUARD_THRESHOLD} ${HF_TOKEN:+-e HF_TOKEN} \
   ${PROMPT_GUARD_MODEL:+-e PROMPT_GUARD_MODEL} ${PROMPT_GUARD_MAX_CHARS:+-e PROMPT_GUARD_MAX_CHARS} \
+  ${PROMPT_GUARD_WINDOW:+-e PROMPT_GUARD_WINDOW} \
   -v a10-hf-cache:/hf \
   ${LLM_UPSTREAM:+-e LLM_UPSTREAM} ${ANTHROPIC_API_KEY:+-e ANTHROPIC_API_KEY} \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
