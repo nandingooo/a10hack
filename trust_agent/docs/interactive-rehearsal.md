@@ -29,13 +29,8 @@ in `gateway/policy/labels.yaml`. Unrelated opaque HTTPS tunnels remain denied.
 Nonessential Claude traffic is disabled. Additional legitimate domains must be
 reviewed and added to policy rather than bypassing the proxy.
 
-Start the operator UI in another terminal:
-
-```powershell
-python trust_agent/airlock.py dashboard --port 8798
-```
-
-Open its printed local URL. This URL grants operator access to local managed
+The operator UI is provided by the separate frontend, which reads the guard's
+`GET /events` audit stream. It grants operator access to local managed
 runs; keep it local. The UI access key is separate from the agent's sensor key.
 
 Suggested rehearsal prompts in one Claude session:

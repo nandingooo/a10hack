@@ -18,13 +18,8 @@ python trust_agent/airlock.py login SESSION_ID
 python trust_agent/airlock.py chat SESSION_ID
 ```
 
-Open the local evidence interface in a separate terminal:
-
-```powershell
-python trust_agent/airlock.py dashboard --port 8798
-```
-
-Use the printed local operator URL. STOP terminates both the agent container and
+The operator UI is provided by the separate frontend, which reads the guard's
+`GET /events` audit stream. STOP terminates both the agent container and
 gateway and verifies that they have stopped. It also terminates interactive exec
 sessions and child processes. Revoked sessions are not resumed as active sessions.
 

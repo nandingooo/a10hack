@@ -170,12 +170,7 @@ def main():
         subs.add_parser(verb).add_argument('session')
     for verb in ('login','chat','auth-status'):
         subs.add_parser(verb).add_argument('session')
-    dashboard=subs.add_parser('dashboard')
-    dashboard.add_argument('--port',type=int,default=8798)
     args=parser.parse_args()
-    if args.action=='dashboard':
-        from dashboard.server import serve
-        return serve(args.port)
     if args.action=='run':
         docker('info','--format','{{.ServerVersion}}',timeout=15)
         command=args.command or ['python3','/opt/airlock/sandbox/session_idle.py']
