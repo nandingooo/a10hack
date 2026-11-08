@@ -1,67 +1,66 @@
 <#
 .SYNOPSIS
-  TrustAgent sandbox shim. Launches a CLI agent INSIDE the TrustAgent Docker
-  sandbox (isolated network, forced-proxy egress, lifecycle hooks) instead of
-  running it directly on the host.
+  TrustAgent auto-sandbox wrapper for Claude Code (gateway-mediated control plane).
 
 .DESCRIPTION
-  Alias `claude` to this script to make sandboxing transparent: typing `claude`
-  in a repo then launches a boxed, guarded agent. Add to your PowerShell $PROFILE:
+  Dot-source this from your PowerShell $PROFILE:
 
-      function claude { & "<path>\trust_agent\sandbox\trustagent-claude.ps1" @args }
+      . "C:\...\trust_agent\sandbox\trustagent-claude.ps1"
 
-  (This shadows the real `claude` binary. To call the raw CLI, use:
-      & (Get-Command claude -CommandType Application) ... )
+  Then every time you type `claude`, the session is automatically placed inside
+  the TrustAgent sandbox: the wrapper ensures the decision gateway is running and
+  the global hooks are installed, so EVERY tool action the agent takes is routed
+  through the guard (ALLOW / BLOCK / STOP) before it executes. No manual setup.
 
-.PARAMETER Repo
-  Repository to mount into the sandbox (default: current directory). Must contain
-  no symlinks (the launcher rejects them for safety).
+  This is a control-plane sandbox (gateway mediation), not OS-level isolation:
+  the agent runs on the host but cannot take any tool action without the guard's
+  approval. If the gateway is unreachable the hooks fail CLOSED (all actions
+  blocked), so a broken gateway can never silently un-sandbox a session.
 
-.PARAMETER Keep
-  Leave the sandbox running on exit instead of stopping it.
+  To launch the raw CLI without the sandbox (e.g. when developing TrustAgent
+  itself, to avoid self-mediating your build session):
 
-.PARAMETER SmokeTest
-  Launch, query the guard, and stop -- skipping the interactive login/chat.
-  Used to verify the wrapper without a live Claude login.
+      $env:TRUSTAGENT_BYPASS = '1'; claude     # one session
+      Remove-Item Env:\TRUSTAGENT_BYPASS        # re-enable the sandbox
 #>
-[CmdletBinding()]
-param(
-    [string]$Repo = (Get-Location).Path,
-    [int]$Port = 0,
-    [switch]$Keep,
-    [switch]$SmokeTest
-)
 
-$Airlock = (Resolve-Path (Join-Path $PSScriptRoot '..\airlock.py')).Path
-$py = (Get-Command python).Source
-function Invoke-Airlock { param([Parameter(ValueFromRemainingArguments)]$a) & $py $Airlock @a }
+$script:TrustAgentSandboxRoot = $PSScriptRoot
+$script:TrustAgentGateway = (Join-Path $PSScriptRoot '..\gateway\app\service.py')
+$script:TrustAgentHealth  = 'http://127.0.0.1:8787/health'
 
-if ($Port -eq 0) { $Port = Get-Random -Minimum 8800 -Maximum 8899 }
-
-Write-Host "[TrustAgent] Launching sandboxed agent for $Repo (guard on :$Port)..." -ForegroundColor Cyan
-$out = Invoke-Airlock run --repo $Repo --port $Port --detach
-$match = [regex]::Match(($out -join "`n"), 'Session:\s*(\S+)')
-if (-not $match.Success) { Write-Error "Sandbox launch failed:`n$out"; return }
-$session = $match.Groups[1].Value
-Write-Host "[TrustAgent] Sandbox up. Session $session -- agent is isolated; all egress forced through the guard." -ForegroundColor Green
-
-try {
-    if ($SmokeTest) {
-        Write-Host "[TrustAgent] Smoke test -- guard status:" -ForegroundColor Cyan
-        Invoke-Airlock status $session
-        return
-    }
-    Write-Host "[TrustAgent] Checking authentication inside the sandbox..." -ForegroundColor Cyan
-    Invoke-Airlock auth-status $session
-    Write-Host "[TrustAgent] Opening login (one-time per session); then dropping you into the agent." -ForegroundColor Cyan
-    Invoke-Airlock login $session
-    Invoke-Airlock chat $session
+function Test-TrustAgentGateway {
+    try { Invoke-RestMethod $script:TrustAgentHealth -TimeoutSec 1 -ErrorAction Stop | Out-Null; return $true }
+    catch { return $false }
 }
-finally {
-    if ($Keep) {
-        Write-Host "[TrustAgent] Sandbox left running. Stop with: python `"$Airlock`" stop $session" -ForegroundColor Yellow
-    } else {
-        Write-Host "[TrustAgent] Stopping sandbox $session..." -ForegroundColor Cyan
-        Invoke-Airlock stop $session
+
+function Start-TrustAgentGateway {
+    if (Test-TrustAgentGateway) { return $true }
+    $py = (Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $py) { Write-Warning '[TrustAgent] python not found; cannot start the gateway.'; return $false }
+    Start-Process $py -ArgumentList "`"$script:TrustAgentGateway`"" -WindowStyle Hidden | Out-Null
+    for ($i = 0; $i -lt 20; $i++) { Start-Sleep -Milliseconds 300; if (Test-TrustAgentGateway) { return $true } }
+    Write-Warning '[TrustAgent] gateway did not come up; sessions will fail closed (all actions blocked).'
+    return $false
+}
+
+function Install-TrustAgentHooks {
+    $settings = Join-Path $HOME '.claude\settings.json'
+    $hasHook = (Test-Path $settings) -and (Select-String -Path $settings -Pattern 'hook\.py' -Quiet)
+    if (-not $hasHook) {
+        $py = (Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        if ($py) { & $py (Join-Path $script:TrustAgentSandboxRoot 'install_hooks.py') $HOME | Out-Null }
     }
+}
+
+function claude {
+    # Resolve the REAL claude executable (Application, never this function -> no recursion).
+    $real = (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $real) { Write-Error '[TrustAgent] claude executable not found on PATH.'; return }
+
+    if ($env:TRUSTAGENT_BYPASS -eq '1') { & $real @args; return }
+
+    Install-TrustAgentHooks
+    [void](Start-TrustAgentGateway)
+    Write-Host '[TrustAgent] session sandboxed - every tool action routes through the guard. ($env:TRUSTAGENT_BYPASS=1 to disable)' -ForegroundColor DarkCyan
+    & $real @args
 }
