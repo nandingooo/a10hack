@@ -1,0 +1,6 @@
+# dist/ is committed on purpose: the gateway serves it, so a server only needs Python.
+# Run `npm run build` after editing src/ and commit the new dist/.
+node_modules/
+__pycache__/
+.env
+.DS_Store
