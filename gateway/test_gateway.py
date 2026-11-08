@@ -309,7 +309,7 @@ def test_redirects_are_not_followed():
     assert status == 302 and hdrs["location"] == "http://169.254.169.254/"
 
 
-# ---------- prompt guard (fake scorer; the real model is exercised by score_files.py) ----------
+# ---------- injection classifier (fake scorer; the real model is exercised by score_files.py) ----------
 
 import classifier  # noqa: E402
 

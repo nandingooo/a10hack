@@ -179,13 +179,13 @@ def egress(method: str, url: str, checked: Checked, **kw) -> tuple[int, dict, by
 
 
 def screen(state: SessionState, kind: str, source: str, content: str, tags: dict) -> dict:
-    """Prompt Guard on content the agent is about to see. A hit can only lower trust to
+    """Injection classifier on content the agent is about to see. A hit can only lower trust to
     'untrusted' (R1/R3 then block); it never blocks the read itself and never raises trust."""
     v = classifier.check(content)
     if v is None or not v.flagged:
         return tags
     d = Decision("allow", "PG-injection",
-                 f"prompt guard score {v.score:.2f} >= {classifier.THRESHOLD}; read treated as untrusted",
+                 f"injection classifier score {v.score:.2f} >= {classifier.THRESHOLD}; read treated as untrusted",
                  alert=True)
     record(state, "prompt_guard", {"source_kind": kind, "source": source, "score": v.score,
                                    "hidden_parts": v.hidden_parts, "truncated": v.truncated,

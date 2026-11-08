@@ -1,7 +1,7 @@
-"""Evaluate Prompt Guard models on labeled cases, scoring exactly as the gateway does.
+"""Evaluate the injection classifier (ProtectAI) on labeled cases, scoring exactly as the gateway does.
 
-  python gateway/eval_guard.py                                  # 86M (default model) on gateway/eval/cases.jsonl
-  python gateway/eval_guard.py --models 22M 86M --deepset       # both models, plus a public set
+  python gateway/eval_guard.py                                  # gateway/eval/cases.jsonl
+  python gateway/eval_guard.py --deepset --injecagent 300       # plus two public sets
   python gateway/eval_guard.py --cases                          # also print every case's score
 
 Every case has a `source`. Categories:
@@ -29,9 +29,8 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 import classifier  # noqa: E402
 
-# All three are binary DeBERTa classifiers with the injection/malicious class at index 1.
-MODELS = {"22M": "meta-llama/Llama-Prompt-Guard-2-22M", "86M": "meta-llama/Llama-Prompt-Guard-2-86M",
-          "protectai": "protectai/deberta-v3-base-prompt-injection-v2"}
+# The gateway's model; its injection class is at index 1.
+MODELS = {"protectai": "protectai/deberta-v3-base-prompt-injection-v2"}
 
 # G: one harmless ~12 KiB document (inside the 16 KiB scoring limit), with injections placed
 # at the start, middle and end. Paragraphs vary so the text isn't one repeated sentence.
@@ -161,7 +160,7 @@ def report(models: list[str], cases: list[dict], title: str) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models", nargs="+", default=["86M"], choices=list(MODELS))
+    ap.add_argument("--models", nargs="+", default=["protectai"], choices=list(MODELS))
     ap.add_argument("--deepset", action="store_true")
     ap.add_argument("--cases", action="store_true", help="print every case's score")
     ap.add_argument("--injecagent", type=int, default=0, metavar="N",

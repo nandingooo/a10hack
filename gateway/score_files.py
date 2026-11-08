@@ -1,7 +1,6 @@
-"""Score files with the real Prompt Guard model, to pick PROMPT_GUARD_THRESHOLD from data.
+"""Score files with the real classifier model (ProtectAI), to pick PROMPT_GUARD_THRESHOLD from data.
 
   pip install -r gateway/requirements-guard.txt
-  huggingface-cli login              # an account that accepted the Llama license for the model
   python gateway/score_files.py                     # every file in gateway/workspace/files
   python gateway/score_files.py some.md other.html  # or specific files
 
