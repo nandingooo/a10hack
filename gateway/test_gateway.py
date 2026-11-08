@@ -166,18 +166,18 @@ from egress import check_destination  # noqa: E402
     "http://metadata.google.internal/",
 ])
 def test_internal_destinations_blocked(url):
-    reason, _ = check_destination(url, offline=False)
-    assert reason, url
+    assert check_destination(url, offline=False).reason, url
 
 
 def test_name_resolving_to_private_ip_blocked():
     fake = lambda host, port: [(2, 1, 6, "", ("10.1.2.3", 0))]
-    assert "10.1.2.3" in check_destination("https://innocent.example/", offline=False, resolve=fake)[0]
+    assert "10.1.2.3" in check_destination("https://innocent.example/", offline=False, resolve=fake).reason
 
 
 def test_public_destination_allowed():
     fake = lambda host, port: [(2, 1, 6, "", ("93.184.216.34", 0))]
-    assert check_destination("https://example.com/x", offline=False, resolve=fake)[0] is None
+    c = check_destination("https://example.com/x", offline=False, resolve=fake)
+    assert c.reason is None and c.addrs == ["93.184.216.34"]
 
 
 def test_ssrf_through_gateway_is_blocked_and_alerts(client):
@@ -275,3 +275,35 @@ def test_mcp_lists_and_calls_tools_through_rules(client):
                     tok="tok-b").json()
     assert "R0-internal-destination" in ssrf["result"]["content"][0]["text"]
     assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).status_code == 401
+
+
+# ---------- DNS rebinding: connect only to the vetted address ----------
+
+import httpx  # noqa: E402
+from egress import pinned_request  # noqa: E402
+
+
+def test_pinned_request_uses_vetted_ip_and_keeps_host_and_sni():
+    seen = {}
+
+    def handler(request):
+        seen.update(url=str(request.url), host=request.headers["host"],
+                    sni=request.extensions.get("sni_hostname"))
+        return httpx.Response(200, content=b"x" * 5000, headers={"content-type": "text/plain"})
+
+    lookups = iter([[(2, 1, 6, "", ("93.184.216.34", 0))], [(2, 1, 6, "", ("169.254.169.254", 0))]])
+    checked = check_destination("https://rebind.example/path?q=1", offline=False,
+                                resolve=lambda h, p: next(lookups))  # first answer public...
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    status, _, body = pinned_request(client, "GET", "https://rebind.example/path?q=1", checked, max_bytes=1000)
+    # ...and the second (rebound) answer is never consulted: the request went to the vetted IP.
+    assert seen == {"url": "https://93.184.216.34/path?q=1", "host": "rebind.example", "sni": "rebind.example"}
+    assert status == 200 and len(body) == 1000  # body capped
+
+
+def test_redirects_are_not_followed():
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(302, headers={"location": "http://169.254.169.254/"})))
+    checked = check_destination("http://93.184.216.34/", offline=False)
+    status, hdrs, _ = pinned_request(client, "GET", "http://93.184.216.34/", checked, max_bytes=100)
+    assert status == 302 and hdrs["location"] == "http://169.254.169.254/"

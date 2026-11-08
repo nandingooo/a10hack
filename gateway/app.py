@@ -17,7 +17,8 @@ Config (env):
   FILES_DIR                          workspace root (default /data/files), tags in FILES_DIR/../tags.json
   APPROVED_DESTINATIONS              JSON {"host": "public|sensitive|secret"}
   RISK_URL                           optional risk layer; can only make decisions stricter
-  OFFLINE=1                          don't really fetch/send (default 1 in this placeholder)
+  OFFLINE=1                          simulate fetch/send (default; demo uses made-up hosts). OFFLINE=0
+                                     sends for real, pinned to the vetted IP (see egress.py)
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from egress import check_destination
+from egress import Checked, check_destination, pinned_request
 from policy import WEB_CONTENT, Decision, SessionState, decide_action, decide_egress, normalize_tags, stricter
 
 log = logging.getLogger("gateway")
@@ -155,14 +156,25 @@ def with_risk(state: SessionState, kind: str, detail: dict, d: Decision) -> Deci
     return d
 
 
-def guard_destination(state: SessionState, kind: str, url: str) -> str:
+# Outbound client for agent traffic: ignores proxy env vars; connects only to vetted IPs.
+_egress = httpx.Client(timeout=10, trust_env=False)
+
+
+def guard_destination(state: SessionState, kind: str, url: str) -> Checked:
     """R0: the gateway never reaches internal addresses on an agent's behalf."""
-    reason, host = check_destination(url, offline=OFFLINE)
-    if reason:
-        d = Decision("block", "R0-internal-destination", reason, alert=True)
-        record(state, kind, {"url": url, "destination": host}, d)
+    checked = check_destination(url, offline=OFFLINE)
+    if checked.reason:
+        d = Decision("block", "R0-internal-destination", checked.reason, alert=True)
+        record(state, kind, {"url": url, "destination": checked.host}, d)
         enforce(d)
-    return host
+    return checked
+
+
+def egress(method: str, url: str, checked: Checked, **kw) -> tuple[int, dict, bytes]:
+    try:
+        return pinned_request(_egress, method, url, checked, MAX_READ_BYTES, **kw)
+    except (httpx.HTTPError, ValueError) as e:
+        raise HTTPException(502, f"upstream request failed: {type(e).__name__}: {e}")
 
 
 def enforce(d: Decision) -> None:
@@ -240,28 +252,32 @@ def read_file(body: ReadFile, state: SessionState = Depends(session)):
 
 @app.post("/tools/fetch_url")
 def fetch_url(body: Fetch, state: SessionState = Depends(session)):
-    host = guard_destination(state, "fetch_url", body.url)
-    d = with_risk(state, "fetch_url", {"url": body.url}, decide_egress(state, host, APPROVED))
-    record(state, "fetch_url", {"url": body.url, "destination": host}, d)
+    checked = guard_destination(state, "fetch_url", body.url)
+    d = with_risk(state, "fetch_url", {"url": body.url}, decide_egress(state, checked.host, APPROVED))
+    record(state, "fetch_url", {"url": body.url, "destination": checked.host, "ip": (checked.addrs or [None])[0]}, d)
     enforce(d)
     if OFFLINE:
-        content = f"[offline placeholder for {body.url}]"
+        return_ = {"url": body.url, "status": 200, "content": f"[offline placeholder for {body.url}]"}
     else:
-        content = httpx.get(body.url, timeout=10, follow_redirects=False).text[:MAX_READ_BYTES]
+        status, hdrs, raw = egress("GET", body.url, checked)
+        return_ = {"url": body.url, "status": status, "content": raw.decode(errors="replace")}
+        if "location" in hdrs:
+            return_["redirect_to"] = hdrs["location"]  # not followed; fetching it is re-checked
     state.absorb(f"url:{body.url}", WEB_CONTENT)
-    return {"url": body.url, "content": content}
+    return return_
 
 
 @app.post("/tools/send")
 def send(body: Send, state: SessionState = Depends(session)):
-    host = guard_destination(state, "send", body.url)
+    checked = guard_destination(state, "send", body.url)
     d = with_risk(state, "send", {"url": body.url, "bytes": len(body.body)},
-                  decide_egress(state, host, APPROVED))
-    record(state, "send", {"url": body.url, "destination": host, "bytes": len(body.body)}, d)
+                  decide_egress(state, checked.host, APPROVED))
+    record(state, "send", {"url": body.url, "destination": checked.host, "bytes": len(body.body)}, d)
     enforce(d)
-    if not OFFLINE:
-        httpx.post(body.url, content=body.body, timeout=10)
-    return {"sent": True, "offline": OFFLINE}
+    if OFFLINE:
+        return {"sent": True, "offline": True}
+    status, _, _ = egress("POST", body.url, checked, content=body.body.encode())
+    return {"sent": True, "offline": False, "status": status}
 
 
 @app.post("/tools/action")
