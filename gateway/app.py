@@ -36,6 +36,7 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
+import classifier
 from egress import Checked, check_destination, pinned_request
 from policy import WEB_CONTENT, Decision, SessionState, decide_action, decide_egress, normalize_tags, stricter
 
@@ -177,6 +178,20 @@ def egress(method: str, url: str, checked: Checked, **kw) -> tuple[int, dict, by
         raise HTTPException(502, f"upstream request failed: {type(e).__name__}: {e}")
 
 
+def screen(state: SessionState, kind: str, source: str, content: str, tags: dict) -> dict:
+    """Prompt Guard on content the agent is about to see. A hit can only lower trust to
+    'untrusted' (R1/R3 then block); it never blocks the read itself and never raises trust."""
+    v = classifier.check(content)
+    if v is None or not v.flagged:
+        return tags
+    d = Decision("allow", "PG-injection",
+                 f"prompt guard score {v.score:.2f} >= {classifier.THRESHOLD}; read treated as untrusted",
+                 alert=True)
+    record(state, "prompt_guard", {"source_kind": kind, "source": source, "score": v.score,
+                                   "hidden_parts": v.hidden_parts, "tags_before": tags}, d)
+    return {**tags, "trust": "untrusted"}
+
+
 def enforce(d: Decision) -> None:
     if d.decision == "block":
         raise HTTPException(403, {"decision": "block", "rule": d.rule, "reason": d.reason})
@@ -240,14 +255,15 @@ def read_file(body: ReadFile, state: SessionState = Depends(session)):
     if not p.is_file():
         raise HTTPException(404, "no such file")
     rel = str(p.relative_to(FILES_DIR))
-    tags = normalize_tags(load_tags().get(rel))
+    content = p.read_bytes()[:MAX_READ_BYTES].decode(errors="replace")
+    tags = screen(state, "read_file", rel, content, normalize_tags(load_tags().get(rel)))
     state.absorb(f"file:{rel}", tags)
     if tags["bait"]:
         d = Decision("allow", "R4-bait", "DECOY READ: nothing may leave this session now", alert=True)
     else:
         d = Decision("allow", "read", "reads are allowed; tags applied to session")
     record(state, "read_file", {"path": rel, "file_tags": tags}, d)
-    return {"path": rel, "content": p.read_bytes()[:MAX_READ_BYTES].decode(errors="replace")}
+    return {"path": rel, "content": content}
 
 
 @app.post("/tools/fetch_url")
@@ -263,7 +279,7 @@ def fetch_url(body: Fetch, state: SessionState = Depends(session)):
         return_ = {"url": body.url, "status": status, "content": raw.decode(errors="replace")}
         if "location" in hdrs:
             return_["redirect_to"] = hdrs["location"]  # not followed; fetching it is re-checked
-    state.absorb(f"url:{body.url}", WEB_CONTENT)
+    state.absorb(f"url:{body.url}", screen(state, "fetch_url", body.url, return_["content"], WEB_CONTENT))
     return return_
 
 
@@ -306,6 +322,8 @@ def admin_events(session_id: str):
 def admin_alerts():
     return alerts
 
+
+classifier.warm()  # no-op unless PROMPT_GUARD=1
 
 # Model API proxy and MCP server register their routes on `app`.
 import llm  # noqa: E402,F401

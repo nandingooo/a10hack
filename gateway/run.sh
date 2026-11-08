@@ -8,7 +8,13 @@ cd "$(dirname "$0")"
 [ -n "$APPROVED_DESTINATIONS" ] || APPROVED_DESTINATIONS='{"api.internal.example": "sensitive"}'
 export APPROVED_DESTINATIONS GATEWAY_ADMIN_KEY OFFLINE
 : "${OFFLINE:=1}"
-docker build -q -t a10-gateway:latest . >/dev/null
+: "${PROMPT_GUARD:=0}"
+export PROMPT_GUARD
+if [ "$PROMPT_GUARD" = "1" ] && [ -z "$HF_TOKEN" ] && ! docker volume inspect a10-hf-cache >/dev/null 2>&1; then
+  echo "PROMPT_GUARD=1 needs HF_TOKEN the first time (gated model, accept the Llama license on HF)" >&2
+  exit 1
+fi
+docker build -q --build-arg PROMPT_GUARD="$PROMPT_GUARD" -t a10-gateway:latest . >/dev/null
 docker rm -f a10-gateway >/dev/null 2>&1 || true
 docker run -d --name a10-gateway \
   --add-host host.docker.internal:host-gateway \
@@ -17,6 +23,8 @@ docker run -d --name a10-gateway \
   -e SANDBOX_API_URL="${SANDBOX_API_URL:-http://host.docker.internal:9000}" \
   -e SANDBOX_API_KEY -e GATEWAY_ADMIN_KEY -e APPROVED_DESTINATIONS -e OFFLINE \
   ${RISK_URL:+-e RISK_URL} \
+  -e PROMPT_GUARD ${PROMPT_GUARD_THRESHOLD:+-e PROMPT_GUARD_THRESHOLD} ${HF_TOKEN:+-e HF_TOKEN} \
+  -v a10-hf-cache:/hf \
   ${LLM_UPSTREAM:+-e LLM_UPSTREAM} ${ANTHROPIC_API_KEY:+-e ANTHROPIC_API_KEY} \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
   a10-gateway:latest >/dev/null
