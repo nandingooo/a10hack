@@ -1,0 +1,9 @@
+FROM python:3.13-slim
+WORKDIR /opt/airlock
+COPY build-certs/ /usr/local/share/ca-certificates/airlock/
+COPY requirements.txt ./
+RUN update-ca-certificates && pip install --no-cache-dir -r requirements.txt
+COPY gateway ./gateway
+COPY sandbox ./sandbox
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+CMD ["python", "sandbox/managed_gateway.py"]

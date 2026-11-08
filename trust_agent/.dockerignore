@@ -1,0 +1,10 @@
+.runtime
+experiments
+tests
+__pycache__
+**/__pycache__
+**/*.db*
+.git
+.pytest_cache
+.ruff_cache
+.venv

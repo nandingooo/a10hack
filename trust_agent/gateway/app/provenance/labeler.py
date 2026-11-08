@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Optional
 
@@ -53,6 +53,10 @@ class Policy:
     bait_token: str
     approved_hosts: list[str]
     workspace_root: str
+    default_origin: str = "cloned-repo"
+    origin_rules: list[dict] = field(default_factory=list)
+    receivers: list[dict] = field(default_factory=list)
+    allowed_tools: list[str] = field(default_factory=list)
 
     @staticmethod
     def load(path: str = _DEFAULT_CFG) -> "Policy":
@@ -68,7 +72,17 @@ class Policy:
             bait_token=d["bait"]["token"],
             approved_hosts=d["egress"]["approved_hosts"],
             workspace_root=d["workspace_root"],
+            default_origin=d.get("sources", {}).get("default_origin", "cloned-repo"),
+            origin_rules=d.get("sources", {}).get("rules", []),
+            receivers=d.get("egress", {}).get("receivers", []),
+            allowed_tools=d.get("tools", {}).get("allowed", []),
         )
+
+    def origin(self, path: str) -> str:
+        for rule in self.origin_rules:
+            if match(path, rule["paths"]):
+                return rule["origin"]
+        return self.default_origin
 
 
 class Labeler:

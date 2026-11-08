@@ -42,16 +42,7 @@ EventCallback = Callable[[ContextEntry, Optional[object]], None]
 
 
 def default_policy() -> Policy:
-    return Policy(
-        trusted_origins=["user", "operator", "workspace"],
-        untrusted_origins=["cloned-repo", "web", "tool-output", "download"],
-        secret_globs=["**/.env", "**/.aws/credentials", "**/.ssh/*", "**/*token*", "**/*.pem", "**/id_rsa*"],
-        sensitive_globs=["**/config/*", "**/*.log"],
-        bait_files=["**/aws_prod_credentials.txt", "**/.env.production.local"],
-        bait_token="AKIA_FAKE_BAIT_DO_NOT_USE",
-        approved_hosts=["github.com", "pypi.org", "*.pythonhosted.org", "bedrock-runtime.*.amazonaws.com"],
-        workspace_root="",
-    )
+    return Policy.load()
 
 
 def resolve_origin(op: str, target: str) -> str:
@@ -63,7 +54,7 @@ def resolve_origin(op: str, target: str) -> str:
     t = target.replace("\\", "/").lower()
     if any(m in t for m in _UNTRUSTED_MARKERS):
         return "cloned-repo"
-    return "workspace"
+    return default_policy().origin(t)
 
 
 def _is_destructive(cmd: str) -> bool:

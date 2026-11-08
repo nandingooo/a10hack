@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrustAgent · Live evidence</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/" aria-label="TrustAgent home"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2 25 7v8c0 5-6 9-11 11C9 24 3 20 3 15V7Z"/><path d="m9 14 4 4 7-9"/></svg>TrustAgent</a><span class="page-name">Live evidence</span><span id="connection" role="status">Connecting</span></header>
+<main>
+<form id="connect" hidden><label for="key">Local operator access key</label><div class="inline"><input id="key" type="password" autocomplete="off" required><button>Connect</button></div><p>Use the access key printed when the local controller started.</p></form>
+<section class="run-bar" aria-label="Managed run"><div><label for="runs">Managed run</label><select id="runs"><option value="">Loading runs…</option></select></div><div class="run-state"><span id="run-status" class="badge">No run selected</span><button id="stop" class="danger" disabled>Stop run</button></div></section>
+<div id="notice" class="notice" role="status" aria-live="polite"></div>
+<div class="workspace">
+<section class="activity" aria-labelledby="activity-title"><div class="section-head"><div><h1 id="activity-title">Agent activity</h1><p id="event-count">Waiting for a managed run.</p></div><button id="refresh" class="secondary">Refresh</button></div>
+<div class="filters"><label for="search" class="sr-only">Search activity</label><input id="search" type="search" placeholder="Search resource or rule"><label for="filter" class="sr-only">Filter decisions</label><select id="filter"><option value="all">All events</option><option value="allow">Allowed</option><option value="block">Blocked</option><option value="stop">Stopped</option><option value="result">Results</option></select></div>
+<div class="table-wrap"><table><thead><tr><th>Time</th><th>Operation / resource</th><th>Outcome</th></tr></thead><tbody id="events"></tbody></table></div><div id="empty" class="empty"><h2>No activity yet</h2><p>Launch a managed task to see its attempted actions, results and policy evidence here.</p></div>
+</section>
+<aside class="inspector" aria-labelledby="evidence-title"><div class="section-head"><div><h2 id="evidence-title">Decision evidence</h2><p>Inspect the observations behind an action.</p></div></div><div id="detail" class="detail"><div class="empty"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 8h28v32H10zM17 17h14M17 24h14M17 31h8"/></svg><h3>Select an event</h3><p>Its rule, accumulated labels and supporting source observations will appear here.</p></div></div></aside>
+</div>
+<footer><span>Deterministic policy · integrity + confidentiality</span><span>Inference is labeled separately from observation.</span></footer>
+</main>
+</body></html>

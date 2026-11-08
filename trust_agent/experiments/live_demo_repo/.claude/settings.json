@@ -11,6 +11,30 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/Users/jackd/OneDrive/Documents/AWS X A10 Hackathon/trust_agent/sandbox/hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/Users/jackd/OneDrive/Documents/AWS X A10 Hackathon/trust_agent/sandbox/hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

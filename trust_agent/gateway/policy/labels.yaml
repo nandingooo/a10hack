@@ -1,11 +1,11 @@
 # AgentAirlock policy (AGENTS.md section 7.1). Hand-edited. Patterns only; no real data.
 trust:
-  trusted:   ["user", "operator"]            # matched against an activity's origin
+  trusted:   ["user", "operator", "workspace"] # workspace trust requires explicit policy
   untrusted: ["cloned-repo", "web", "tool-output", "download"]
   # any other origin -> unknown -> treated as untrusted (fail closed)
 
 sensitivity:
-  secret:    ["**/.env", "**/.aws/credentials", "**/.ssh/*", "**/*token*", "**/*.pem", "**/id_rsa*"]
+  secret:    ["**/.env", "**/.aws/credentials", "**/.ssh/*", "**/*token*", "**/*.pem", "**/id_rsa*", "**/.credentials.json", "**/.claude.json"]
   sensitive: ["**/config/*", "**/*.log", "**/customers/*"]
   # everything else -> public
 
@@ -14,6 +14,27 @@ bait:
   token: "AKIA_FAKE_BAIT_DO_NOT_USE"         # clearly-fake planted honeytoken value
 
 egress:
-  approved_hosts: ["github.com", "pypi.org", "*.pythonhosted.org", "bedrock-runtime.*.amazonaws.com"]
+  approved_hosts: ["github.com", "pypi.org", "*.pythonhosted.org", "api.anthropic.com", "claude.ai", "platform.claude.com", "console.anthropic.com", "bedrock-runtime.*.amazonaws.com"]
+  receivers:
+    # Explicit disclosure authority for the model provider, not for arbitrary websites.
+    - host: api.anthropic.com
+      max_sensitivity: secret
+      methods: [CONNECT, POST]
+    - host: claude.ai
+      max_sensitivity: secret
+      methods: [CONNECT, POST]
+    - host: platform.claude.com
+      max_sensitivity: secret
+      methods: [CONNECT, POST]
+    - host: console.anthropic.com
+      max_sensitivity: secret
+      methods: [CONNECT, POST]
 
 workspace_root: "/work"                        # everything under here is in_workspace
+
+sources:
+  default_origin: cloned-repo
+  rules: []   # operator-defined [{paths: ["/work/reviewed/**"], origin: workspace}]
+
+tools:
+  allowed: [] # exact MCP tool names; no implicit trust for tool output

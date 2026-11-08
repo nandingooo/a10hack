@@ -13,3 +13,11 @@ experiments/claude_err.txt
 # local env
 .venv/
 venv/
+
+# Persistent local guard state
+experiments/*.db
+experiments/*.db-*
+
+# Private managed session manifests and snapshots
+.runtime/
+build-certs/*.crt

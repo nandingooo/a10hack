@@ -46,7 +46,7 @@ class GraphStore(ProvenanceStore):
 
     def append(self, entry: ContextEntry) -> str:
         sess = entry.session_id
-        parents: dict[str, float] = {}
+        parents: dict[str, float] = {pid: 0.8 for pid in entry.parents}
         if entry.is_action:
             # the action inherits the reads that fed it (recency)
             for sid in self._working[sess][-self.recency_window:]:

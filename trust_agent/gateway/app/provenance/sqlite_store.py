@@ -18,6 +18,8 @@ Edges are built exactly like GraphStore, but derived from SQL (restart-safe):
 from __future__ import annotations
 
 import sqlite3
+import json
+from contextlib import contextmanager
 from pathlib import Path
 
 from .store import Aggregate, ActionProps, Channel, ContextEntry, Kind, Op
@@ -77,31 +79,49 @@ class SqliteStore:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode = WAL")
         self._db.executescript(_SCHEMA)
+        if 'metadata' not in {r[1] for r in self._db.execute('PRAGMA table_info(entries)')}:
+            self._db.execute("ALTER TABLE entries ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'")
         self._db.commit()
+
+    @contextmanager
+    def transaction(self):
+        """Nested savepoints allow provenance and lifecycle state to commit together."""
+        import uuid
+        name = 'tx_' + uuid.uuid4().hex
+        self._db.execute(f'SAVEPOINT {name}')
+        try:
+            yield
+        except BaseException:
+            self._db.execute(f'ROLLBACK TO {name}')
+            self._db.execute(f'RELEASE {name}')
+            raise
+        else:
+            self._db.execute(f'RELEASE {name}')
 
     # ---- ProvenanceStore interface ----
 
     def append(self, entry: ContextEntry) -> str:
         db = self._db
-        with db:  # transaction
+        with self.transaction():
             db.execute("INSERT OR IGNORE INTO sessions(id, status) VALUES (?, 'ACTIVE')",
                        (entry.session_id,))
             lbl = entry.labels
             ap = entry.action_props
             db.execute(
-                """INSERT OR REPLACE INTO entries
+                """INSERT INTO entries
                    (id, session_id, ts, kind, channel, op, target, target_norm, origin,
-                    trust, sensitivity, bait, in_workspace, confidence, is_exit, is_destructive, verdict, rule)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    trust, sensitivity, bait, in_workspace, confidence, is_exit, is_destructive, verdict, rule, metadata)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (entry.id, entry.session_id, entry.ts, entry.kind.value, entry.channel.value,
                  entry.op.value, entry.target, _norm(entry.target), entry.origin,
                  lbl.effective_trust.value, lbl.sensitivity.value, int(lbl.bait),
                  int(lbl.in_workspace), lbl.confidence,
                  int(bool(ap and ap.is_exit)), int(bool(ap and ap.is_destructive)),
-                 entry.verdict, entry.rule),
+                 entry.verdict, entry.rule, json.dumps(entry.metadata)),
             )
             rowid = db.execute("SELECT rowid FROM entries WHERE id = ?", (entry.id,)).fetchone()[0]
             parents = self._compute_parents(db, entry, rowid)
+            parents.update({pid: 0.8 for pid in entry.parents})
             for pid, conf in parents.items():
                 db.execute("INSERT OR IGNORE INTO edges(child_id, parent_id, confidence) VALUES (?,?,?)",
                            (entry.id, pid, conf))
@@ -207,7 +227,7 @@ class SqliteStore:
         return (row[0], row[1])
 
     def kill(self, session_id: str) -> None:
-        with self._db:
+        with self.transaction():
             self._db.execute("INSERT OR IGNORE INTO sessions(id, status) VALUES (?, 'KILLED')", (session_id,))
             self._db.execute("UPDATE sessions SET status = 'KILLED' WHERE id = ?", (session_id,))
 
@@ -232,6 +252,7 @@ class SqliteStore:
             id=r["id"], ts=r["ts"], session_id=r["session_id"], kind=Kind(r["kind"]),
             channel=Channel(r["channel"]), op=Op(r["op"]), target=r["target"], origin=r["origin"],
             labels=labels, action_props=ap, verdict=r["verdict"], rule=r["rule"],
+            metadata=json.loads(r["metadata"]),
         )
         entry.parents = [pid for pid, _ in self._parents(r["id"])]
         return entry

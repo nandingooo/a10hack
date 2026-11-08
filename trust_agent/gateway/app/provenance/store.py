@@ -35,6 +35,8 @@ class Op(str, Enum):
     NETWORK_REQUEST = "NetworkRequest"
     CALL_TOOL = "CallTool"
     MODEL_CALL = "ModelCall"
+    COPY_FILE = "CopyFile"
+    MOVE_FILE = "MoveFile"
 
 
 # Ops that can cause harm — decisions happen at these ("sinks").
@@ -68,6 +70,7 @@ class ContextEntry:
     # MVP: always []. Tree phase: parent entry ids. This field is the single
     # hook that makes the queue->tree upgrade cheap (AGENTS.md 14).
     parents: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_action(self) -> bool:

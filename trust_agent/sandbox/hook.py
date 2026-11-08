@@ -12,6 +12,7 @@ Install via a project .claude/settings.json:
      {"type":"command","command":"python \"<abs>/sandbox/hook.py\""}]}]}}
 Env: AIRLOCK_URL (default http://127.0.0.1:8787)
 """
+import hashlib
 import json
 import os
 import sys
@@ -32,7 +33,7 @@ def _emit(decision: str, rule: str, reason: str, confidence, action: str) -> int
     block: a banner for the user + an explicit 'blocked by TrustAgent' reason
     fed back to the agent, so it's unmistakable this came from OUR service."""
     stopped = decision == "stop"
-    label = "STOPPED  (session killed)" if stopped else ("BLOCKED" if decision != "ask" else "NEEDS APPROVAL")
+    label = "STOPPED  (tool access revoked)" if stopped else ("BLOCKED" if decision != "ask" else "NEEDS APPROVAL")
     banner = (
         "\n"
         "==================  TRUSTAGENT GUARD  ==================\n"
@@ -40,7 +41,7 @@ def _emit(decision: str, rule: str, reason: str, confidence, action: str) -> int
         f"  rule:    {rule}\n"
         f"  reason:  {reason} (confidence {confidence})\n"
         f"  action:  {action}\n"
-        + ("  status:  SESSION KILLED - all further actions refused\n" if stopped else "")
+        + ("  status:  SESSION REVOKED - modeled tool actions refused\n" if stopped else "")
         + "========================================================"
     )
     agent_reason = (
@@ -62,7 +63,7 @@ def _emit(decision: str, rule: str, reason: str, confidence, action: str) -> int
 def to_request(ev: dict):
     tool = ev.get("tool_name") or ""
     inp = ev.get("tool_input") or {}
-    session = ev.get("session_id") or "unknown"
+    session = os.environ.get("AIRLOCK_SESSION") or ev.get("session_id")
     if tool in READ:
         return {"session_id": session, "op": "ReadFile",
                 "target": inp.get("file_path") or inp.get("path") or inp.get("pattern") or "", "args": inp}
@@ -73,11 +74,10 @@ def to_request(ev: dict):
         return {"session_id": session, "op": "RunCommand", "target": inp.get("command") or "", "args": inp}
     if tool == "WebFetch":
         url = str(inp.get("url") or "")
-        host = url.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0]
-        return {"session_id": session, "op": "NetworkRequest", "target": host, "args": {"url": url}}
+        return {"session_id": session, "op": "NetworkRequest", "target": url, "args": {"url": url, "method":"GET"}}
     if tool.startswith("mcp__"):
         return {"session_id": session, "op": "CallTool", "target": tool, "args": inp}
-    return None  # a tool we don't model -> allow
+    return {"session_id": session, "op": "CallTool", "target": tool, "args": inp}
 
 
 def main() -> int:
@@ -85,23 +85,53 @@ def main() -> int:
         ev = json.load(sys.stdin)
     except Exception:
         ev = {}
+    if not isinstance(ev, dict) or not isinstance(ev.get("tool_input", {}), dict):
+        return _emit("block", "invalid_event", "Malformed tool event", 1.0, "unknown")
+    if ev.get("hook_event_name") in ("PostToolUse", "PostToolUseFailure", "PermissionDenied"):
+        response = ev.get("tool_response") or {}
+        success = ev["hook_event_name"] == "PostToolUse"
+        if isinstance(response, dict):
+            success = success and not response.get("is_error", False) and response.get("exit_code", 0) == 0
+        data = json.dumps({"session_id": os.environ.get("AIRLOCK_SESSION") or ev.get("session_id"), "tool_use_id": ev.get("tool_use_id"), "success": success,
+            "exposure": "none" if ev["hook_event_name"] == "PermissionDenied" else "exposed" if response or ev.get("error") else "unknown",
+            "output_digest": hashlib.sha256(json.dumps(response or ev.get("error", ""), sort_keys=True).encode()).hexdigest()}).encode()
+        try:
+            result = urllib.request.urlopen(urllib.request.Request(URL.replace('/decide', '/complete'), data=data,
+                headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ.get("AIRLOCK_SENSOR_TOKEN", "")}), timeout=5)
+            if not json.loads(result.read()).get("ok"):
+                raise ValueError("completion rejected")
+        except Exception as exc:
+            print(f"TrustAgent: context completion failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
     req = to_request(ev)
-    if req is None:
-        return 0  # allow unmodeled tools (TodoWrite, Task, etc.)
+    req.update(phase="before", tool_use_id=ev.get("tool_use_id"), cwd=ev.get("cwd", os.getcwd()))
     try:
         data = json.dumps(req).encode()
         r = urllib.request.urlopen(
-            urllib.request.Request(URL, data=data, headers={"Content-Type": "application/json"}),
+            urllib.request.Request(URL, data=data, headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ.get("AIRLOCK_SENSOR_TOKEN", "")}),
             timeout=5,
         )
         verdict = json.loads(r.read())
+        if not isinstance(verdict, dict) or verdict.get("decision") not in ("allow", "block", "stop", "ask"):
+            raise ValueError("Invalid guard verdict")
     except Exception as e:  # service down/unreachable -> fail closed
         action = f"{req['op']} {str(req.get('target', ''))[:120]}"
         return _emit("block", "fail_closed", f"decision service unreachable: {e}", 1.0, action)
-    decision = verdict.get("decision", "allow")
+    decision = verdict.get("decision", "block")
+    if decision not in ("allow", "block", "stop", "ask"):
+        return _emit("block", "invalid_verdict", "Invalid guard response", 1.0, req["op"])
     if decision in ("block", "stop", "ask"):
+        if decision in ('block','stop'):
+            try:
+                acknowledgment=json.dumps({'session_id':req['session_id'],'tool_use_id':req['tool_use_id']}).encode()
+                urllib.request.urlopen(urllib.request.Request(URL.replace('/decide','/enforcement'),data=acknowledgment,
+                    headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ.get('AIRLOCK_SENSOR_TOKEN','')}),timeout=2).close()
+            except Exception:
+                pass # a missing audit acknowledgment never turns denial into allowance
         action = f"{req['op']} {str(req.get('target', ''))[:120]}"
-        return _emit(decision, verdict.get("rule", ""), verdict.get("reason", ""),
+        evidence = "; ".join(str(e.get("target") or e["id"]) for e in verdict.get("evidence", []))
+        return _emit(decision, verdict.get("rule", ""), verdict.get("reason", "") + ("; evidence: " + evidence if evidence else ""),
                      verdict.get("confidence"), action)
     return 0  # allow
 
