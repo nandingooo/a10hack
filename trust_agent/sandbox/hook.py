@@ -110,11 +110,7 @@ def _confirm_read(ev: dict) -> int:
     return 0
 
 
-def main() -> int:
-    try:
-        ev = json.load(sys.stdin)
-    except Exception:
-        ev = {}
+def handle_event(ev: dict) -> int:
     if ev.get("hook_event_name") == "PostToolUse":
         return _confirm_read(ev)
     if ev.get("hook_event_name") == "PostToolUseFailure":
@@ -133,6 +129,14 @@ def main() -> int:
         return _emit(decision, verdict.get("rule", ""), verdict.get("reason", ""),
                      verdict.get("confidence"), action)
     return 0  # allow
+
+
+def main() -> int:
+    try:
+        ev = json.load(sys.stdin)
+    except Exception:
+        ev = {}
+    return handle_event(ev)
 
 
 if __name__ == "__main__":
