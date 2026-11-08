@@ -122,7 +122,7 @@ class SqliteStore:
             ).fetchall()
             for r in rows[-RECENCY_WINDOW:]:
                 parents[r["id"]] = 0.4
-        else:
+        elif entry.kind != Kind.READ_RESULT:
             # file lineage: last writer of this path (any session -> cross-agent)
             prod = db.execute(
                 "SELECT id FROM entries WHERE op = 'WriteFile' AND target_norm = ? AND id <> ? "
@@ -138,6 +138,12 @@ class SqliteStore:
             "SELECT * FROM entries WHERE session_id = ? ORDER BY rowid", (session_id,)
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]
+
+    def get_entry(self, session_id: str, entry_id: str) -> ContextEntry | None:
+        row = self._db.execute(
+            "SELECT * FROM entries WHERE id = ? AND session_id = ?", (entry_id, session_id)
+        ).fetchone()
+        return self._row_to_entry(row) if row else None
 
     def aggregate(self, session_id: str, action_entry: ContextEntry) -> Aggregate:
         """Graph trace_back over persisted edges (same semantics as GraphStore)."""

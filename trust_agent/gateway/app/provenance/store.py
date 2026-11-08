@@ -17,6 +17,7 @@ from .tags import Labels
 class Kind(str, Enum):
     SOURCE = "source"
     SECRET = "secret"   # a read of a secret-labeled resource
+    READ_RESULT = "read_result"
     ACTION = "action"
 
 
@@ -110,3 +111,6 @@ class ProvenanceStore(ABC):
     @abstractmethod
     def get_entries(self, session_id: str) -> list[ContextEntry]:
         """All recorded entries for a session (for audit / dashboard)."""
+
+    def get_entry(self, session_id: str, entry_id: str) -> ContextEntry | None:
+        return next((entry for entry in self.get_entries(session_id) if entry.id == entry_id), None)

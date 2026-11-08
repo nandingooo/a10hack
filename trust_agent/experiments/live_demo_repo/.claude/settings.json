@@ -6,7 +6,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"C:/Users/jackd/OneDrive/Documents/AWS X A10 Hackathon/trust_agent/sandbox/hook.py\"",
+            "command": "if [ \"${OS-}\" = Windows_NT ]; then interpreter=python; else interpreter=python3; fi; exec \"$interpreter\" \"${CLAUDE_PROJECT_DIR}/../../sandbox/hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"${OS-}\" = Windows_NT ]; then interpreter=python; else interpreter=python3; fi; exec \"$interpreter\" \"${CLAUDE_PROJECT_DIR}/../../sandbox/hook.py\"",
             "timeout": 10
           }
         ]

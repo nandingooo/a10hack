@@ -55,7 +55,7 @@ class GraphStore(ProvenanceStore):
             if entry.op == Op.WRITE_FILE and entry.target:
                 self._producer[_norm(entry.target)] = entry.id   # global: shared files link across agents
             self._working[sess] = []                 # the turn consumed the working set
-        else:
+        elif entry.kind != Kind.READ_RESULT:
             # a read: if this path was produced (by any agent), link to its writer (lineage)
             producer_id = self._producer.get(_norm(entry.target))
             if producer_id and producer_id != entry.id:
@@ -70,6 +70,10 @@ class GraphStore(ProvenanceStore):
 
     def get_entries(self, session_id: str) -> list[ContextEntry]:
         return list(self._by_session.get(session_id, []))
+
+    def get_entry(self, session_id: str, entry_id: str) -> ContextEntry | None:
+        entry = self._index.get(entry_id)
+        return entry if entry is not None and entry.session_id == session_id else None
 
     def aggregate(self, session_id: str, action_entry: ContextEntry) -> Aggregate:
         """trace_back: BFS over `parents` from the action, collecting the tags
