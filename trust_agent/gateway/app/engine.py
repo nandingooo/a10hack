@@ -254,8 +254,9 @@ class Brain:
             return False
         permitted_upload=bool(urls) and all(permitted_resource(url) for url in urls)
         if self.labeler.is_bait_target(op, target, json.dumps(args)):
-            self.kill(session)
-            verdict = self._v('stop', 'bait_touched', 'Canary policy triggered; managed run must terminate')
+            # Block this action ONLY; do not revoke the session. The canary access
+            # is flagged (operator can STOP manually), but the agent continues.
+            verdict = self._v('block', 'bait_touched', 'Canary resource access blocked; action refused (session continues)')
         elif profile.get('strict') and consequential and unresolved and channel != 'egress':
             # Only the isolated (strict) sandbox demands exposure reconciliation before
             # the next sink. In hook-mode, Claude Code runs tools in parallel, so a
