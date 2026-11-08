@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -89,7 +90,9 @@ def prepare(repo,port,command,capabilities=None):
     for base,dirs,files in os.walk(repo,followlinks=False):
         dirs[:]=[d for d in dirs if d not in ('.git','.claude','node_modules','.venv','__pycache__')]
         for name in dirs+files:
-            if Path(base,name).is_symlink() or Path(base,name).is_junction():
+            info = Path(base,name).lstat()
+            junction = os.name == 'nt' and info.st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+            if stat.S_ISLNK(info.st_mode) or junction:
                 raise ValueError('Resolve repository symlinks explicitly before sandbox launch')
     shutil.copytree(repo,snapshot,ignore=shutil.ignore_patterns('.git','.claude','node_modules','.venv','__pycache__'))
     manifest=dict(session_id=session, project='airlock-'+session,port=port,directory=str(directory),
