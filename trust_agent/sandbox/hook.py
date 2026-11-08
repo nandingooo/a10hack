@@ -1,35 +1,68 @@
 """AgentAirlock PreToolUse hook (thin, fail-closed client).
 
-Claude Code fires this BEFORE each tool runs, passing the tool call as JSON on
-stdin. We map it to an action, ask the decision service (which builds the graph
-and runs trace_back), and enforce:
+Agent-neutral sensor: it speaks the shared hook wire format used by BOTH
+Claude Code and OpenAI Codex (identical fields: ``tool_name``, ``tool_input``,
+``tool_use_id``, ``cwd``, ``session_id``, ``hook_event_name``; block via
+``hookSpecificOutput.permissionDecision = "deny"``). The agent fires this BEFORE
+each tool runs, passing the tool call as JSON on stdin. We map it to an action,
+ask the decision service (which builds the graph and runs trace_back), and
+enforce:
   exit 0  -> allow (tool runs)
-  exit 2  -> block/stop (tool is cancelled; reason goes back to the agent)
-Any error reaching the service -> exit 2 (fail closed).
+  deny    -> block/stop (tool is cancelled; reason goes back to the agent)
+Any error reaching the service -> block (fail closed).
 
-Install via a project .claude/settings.json:
+Install (Claude Code) via a project .claude/settings.json:
   {"hooks":{"PreToolUse":[{"matcher":"*","hooks":[
      {"type":"command","command":"python \"<abs>/sandbox/hook.py\""}]}]}}
+Install (Codex) via ~/.codex/hooks.json -> use install_codex_hooks.py.
 Env: AIRLOCK_URL (default http://127.0.0.1:8787)
 """
+import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import urllib.request
 
 URL = os.environ.get("AIRLOCK_URL", "http://127.0.0.1:8787") + "/decide"
-READ = {"Read", "Grep", "Glob", "NotebookRead"}
-WRITE = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-# Shell tools vary by platform: Claude Code uses "Bash" on macOS/Linux and
-# "PowerShell" on Windows. All map to RunCommand so the command is decomposed
-# and evaluated (not treated as an opaque unmodeled tool).
-SHELL = {"Bash", "PowerShell", "Shell", "Cmd"}
-# Claude Code internal/orchestration tools that are NOT sinks (no file, shell, or
-# network side effect) -> allowed without a gateway decision. Without this they
-# hit the "unknown tool -> deny" rule and break normal agent operation.
+# Tool-name sets span Claude Code AND Codex. Codex names are lower_snake_case
+# (e.g. "shell", "read_file", "apply_patch"); Claude names are CamelCase.
+READ = {"Read", "Grep", "Glob", "NotebookRead", "read_file", "list_dir"}
+WRITE = {"Write", "Edit", "MultiEdit", "NotebookEdit",
+         "apply_patch"}  # Codex edits files via the apply_patch tool
+# Shell tools vary by agent/platform: Claude Code uses "Bash" (macOS/Linux) or
+# "PowerShell" (Windows); Codex uses "shell"/"exec"/"local_shell"/"unified_exec".
+# All map to RunCommand so the command is decomposed and evaluated (not treated
+# as an opaque unmodeled tool).
+SHELL = {"Bash", "PowerShell", "Shell", "Cmd",
+         "shell", "exec", "local_shell", "unified_exec"}
+# Internal/orchestration tools that are NOT sinks (no file, shell, or network
+# side effect) -> allowed without a gateway decision. Without this they hit the
+# "unknown tool -> deny" rule and break normal agent operation. Spans Claude
+# Code (TodoWrite, Task, ...) and Codex (update_plan, view_image, web_search).
 PASSTHROUGH = {"TodoWrite", "Task", "ExitPlanMode", "BashOutput", "KillShell",
-               "SlashCommand", "AskUserQuestion", "WebSearch"}
+               "SlashCommand", "AskUserQuestion", "WebSearch",
+               "update_plan", "view_image", "web_search"}
+
+
+def _as_command(value) -> str:
+    """Codex passes shell commands as an argv list (``["bash","-lc","..."]``);
+    Claude passes a string. Normalize both to one string for the guard."""
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return str(value or "")
+
+
+def _apply_patch_target(inp: dict):
+    """Extract the edited path + raw body from a Codex apply_patch tool_input.
+    Shapes seen: {"input": "*** Begin Patch..."}, {"patch": "..."},
+    {"command": ["apply_patch", "*** Begin Patch..."]}. Returns (path, body)."""
+    body = inp.get("input") or inp.get("patch") or ""
+    if not body and isinstance(inp.get("command"), (list, str)):
+        body = _as_command(inp.get("command"))
+    match = re.search(r"\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+)", str(body))
+    return (match.group(1).strip() if match else ""), str(body)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # robust unicode on Windows pipes
@@ -77,11 +110,16 @@ def to_request(ev: dict):
         return {"session_id": session, "op": "ReadFile",
                 "target": inp.get("file_path") or inp.get("path") or inp.get("pattern") or "", "args": inp}
     if tool in WRITE:
+        if tool == "apply_patch":
+            path, body = _apply_patch_target(inp)
+            return {"session_id": session, "op": "WriteFile", "target": path,
+                    "args": {**inp, "path": path, "patch": body}}
         return {"session_id": session, "op": "WriteFile",
                 "target": inp.get("file_path") or inp.get("path") or "", "args": inp}
     if tool in SHELL:
+        cmd = _as_command(inp.get("command") or inp.get("script") or inp.get("cmd"))
         return {"session_id": session, "op": "RunCommand",
-                "target": inp.get("command") or inp.get("script") or "", "args": inp}
+                "target": cmd, "args": {**inp, "command": cmd}}
     if tool == "WebFetch":
         url = str(inp.get("url") or "")
         return {"session_id": session, "op": "NetworkRequest", "target": url, "args": {"url": url, "method":"GET"}}
@@ -90,7 +128,28 @@ def to_request(ev: dict):
     return {"session_id": session, "op": "CallTool", "target": tool, "args": inp}
 
 
-def main() -> int:
+def agent_identity(ev: dict, explicit=None):
+    """Display metadata only. Common tools (e.g. MCP) do not identify a client."""
+    client = explicit or os.environ.get('AIRLOCK_AGENT') or ev.get('agent')
+    if client in ('claude-code', 'codex'):
+        return client
+    # Codex exposes shell calls as "Bash", just like Claude. Prefer runtime
+    # metadata over that shared tool name when older hook installs omit --agent.
+    transcript = ev.get('transcript_path')
+    if isinstance(transcript, str) and '/.codex/' in transcript.replace('\\', '/').lower():
+        return 'codex'
+    model = ev.get('model')
+    if isinstance(model, str) and model.lower().startswith(('gpt-', 'codex-', 'o3', 'o4')):
+        return 'codex'
+    tool = ev.get('tool_name') or ''
+    if tool in {'read_file', 'list_dir', 'apply_patch', 'shell', 'exec', 'local_shell', 'unified_exec'}:
+        return 'codex'
+    if tool in (READ | WRITE | SHELL | {'WebFetch'}) - {'read_file', 'list_dir', 'apply_patch', 'shell', 'exec', 'local_shell', 'unified_exec'}:
+        return 'claude-code'
+    return None
+
+
+def main(agent=None) -> int:
     try:
         ev = json.load(sys.stdin)
     except Exception:
@@ -119,6 +178,9 @@ def main() -> int:
             return 2
         return 0
     req = to_request(ev)
+    client = agent_identity(ev, agent)
+    if client:
+        req['agent'] = client
     req.update(phase="before", tool_use_id=ev.get("tool_use_id"), cwd=ev.get("cwd", os.getcwd()))
     try:
         data = json.dumps(req).encode()
@@ -151,4 +213,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser(description='TrustAgent tool sensor')
+    parser.add_argument('--agent', choices=('claude-code', 'codex'), default=None)
+    sys.exit(main(parser.parse_args().agent))

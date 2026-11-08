@@ -59,6 +59,7 @@ class Brain:
                 row = rows.get(sid, dict(session_id=sid, events=0, last_seq=0, first_ts=None,
                                          last_ts=None, decisions=0, denials=0))
                 agents.append(dict(row, status='KILLED' if self._is_killed(sid) else 'ACTIVE',
+                                   agent=self.state.get('agent_identity', sid, {}).get('agent', configured.get(sid, {}).get('agent', 'unknown')),
                                    managed=sid in configured, strict=bool(configured.get(sid, {}).get('strict'))))
         return sorted(agents, key=lambda a: a['last_ts'] or 0, reverse=True)
 
@@ -285,6 +286,10 @@ class Brain:
                        context=dict(untrusted=untrusted, secret=secret, unresolved=len(unresolved)))
         if any('inference' in e.get('basis','') or e.get('basis') in ('proposed_shell_reference','inflight_operation') or e.get('exposure_status')=='unknown' for e in evidence):
             verdict['confidence']=0.4 # inference heuristic, not a calibrated probability
+        # Sensor-reported client identity is display-only; it never changes policy or labels.
+        agent = req.get('agent')
+        if agent in ('claude-code', 'codex'):
+            self.state.put('agent_identity', session, {'agent': agent})
         self.state.log(session, dict(type='decision', tool_use_id=tool_id, op=op,
             target='[shell command]' if cmd else target, **verdict))
         candidates = provisional + ([entry] if op in ('ReadFile','WriteFile','CopyFile','MoveFile','NetworkRequest') else [])
