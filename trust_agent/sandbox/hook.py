@@ -25,6 +25,11 @@ WRITE = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # "PowerShell" on Windows. All map to RunCommand so the command is decomposed
 # and evaluated (not treated as an opaque unmodeled tool).
 SHELL = {"Bash", "PowerShell", "Shell", "Cmd"}
+# Claude Code internal/orchestration tools that are NOT sinks (no file, shell, or
+# network side effect) -> allowed without a gateway decision. Without this they
+# hit the "unknown tool -> deny" rule and break normal agent operation.
+PASSTHROUGH = {"TodoWrite", "Task", "ExitPlanMode", "BashOutput", "KillShell",
+               "SlashCommand", "AskUserQuestion", "WebSearch"}
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # robust unicode on Windows pipes
@@ -92,6 +97,10 @@ def main() -> int:
         ev = {}
     if not isinstance(ev, dict) or not isinstance(ev.get("tool_input", {}), dict):
         return _emit("block", "invalid_event", "Malformed tool event", 1.0, "unknown")
+    # Non-sink internal tools are allowed without a gateway decision (and need no
+    # completion), on both the before and after events.
+    if (ev.get("tool_name") or "") in PASSTHROUGH:
+        return 0
     if ev.get("hook_event_name") in ("PostToolUse", "PostToolUseFailure", "PermissionDenied"):
         response = ev.get("tool_response") or {}
         success = ev["hook_event_name"] == "PostToolUse"
