@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -77,7 +78,7 @@ def stop(manifest):
     Path(manifest['directory'],'run.json').write_text(json.dumps(manifest,indent=2))
 
 
-def prepare(repo,port,command,capabilities=None):
+def prepare(repo,port,command,capabilities=None,rehearsal=None):
     repo=Path(repo).resolve(strict=True)
     if not repo.is_dir() or repo == ROOT or (ROOT in repo.parents and repo != ROOT/'experiments/live_demo_repo'):
         raise ValueError('Choose a separate project directory or the demo fixture, not the harness source')
@@ -89,12 +90,16 @@ def prepare(repo,port,command,capabilities=None):
     for base,dirs,files in os.walk(repo,followlinks=False):
         dirs[:]=[d for d in dirs if d not in ('.git','.claude','node_modules','.venv','__pycache__')]
         for name in dirs+files:
-            if Path(base,name).is_symlink() or Path(base,name).is_junction():
+            info = Path(base,name).lstat()
+            junction = os.name == 'nt' and info.st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
+            if stat.S_ISLNK(info.st_mode) or junction:
                 raise ValueError('Resolve repository symlinks explicitly before sandbox launch')
     shutil.copytree(repo,snapshot,ignore=shutil.ignore_patterns('.git','.claude','node_modules','.venv','__pycache__'))
     manifest=dict(session_id=session, project='airlock-'+session,port=port,directory=str(directory),
                   compose=str(directory/'compose.json'),admin_token=secrets.token_urlsafe(32),
                   sensor_token=secrets.token_urlsafe(32),workspace_id=hashlib.sha256(str(repo).encode()).hexdigest(),status='PREPARED')
+    if rehearsal:
+        manifest['rehearsal'] = rehearsal
     shutil.copy2(ROOT/'gateway/policy/labels.yaml',directory/'labels.yaml')
     env={'AIRLOCK_SESSION':session,'AIRLOCK_URL':'http://gateway:8787',
          'AIRLOCK_SENSOR_TOKEN':manifest['sensor_token'],'HTTP_PROXY':'http://gateway:8080',
@@ -158,12 +163,15 @@ def supervise(manifest):
 
 
 def main():
+    from sandbox.demo_agent import REHEARSALS
+
     parser=argparse.ArgumentParser(description=__doc__)
     subs=parser.add_subparsers(dest='action',required=True)
     run=subs.add_parser('run')
     run.add_argument('--repo',required=True)
     run.add_argument('--port',type=int,default=8787)
     run.add_argument('--detach',action='store_true')
+    run.add_argument('--rehearsal', choices=REHEARSALS, help='Run a scripted security scenario in the sandbox')
     run.add_argument('--allow-public-upload',action='append',default=[],metavar='HTTPS_URL',help='Authorize POST/PUT/PATCH to this exact host and path subtree; secret context remains prohibited')
     run.add_argument('command',nargs=argparse.REMAINDER)
     for verb in ('stop','logs','status','supervise'):
@@ -172,9 +180,13 @@ def main():
         subs.add_parser(verb).add_argument('session')
     args=parser.parse_args()
     if args.action=='run':
+        if args.rehearsal and args.command:
+            run.error('--rehearsal cannot be combined with a custom command')
         docker('info','--format','{{.ServerVersion}}',timeout=15)
         command=args.command or ['python3','/opt/airlock/sandbox/session_idle.py']
         if command[0]=='--': command=command[1:]
+        if args.rehearsal:
+            command = ['python3', '/opt/airlock/sandbox/demo_agent.py', args.rehearsal]
         from urllib.parse import urlsplit
         capabilities=[]
         for url in args.allow_public_upload:
@@ -182,7 +194,7 @@ def main():
             if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.query or parsed.fragment:
                 raise ValueError('Upload scope must be an HTTPS URL without credentials, query or fragment')
             capabilities.append(dict(host=parsed.hostname,path_prefix=parsed.path or '/',methods=['POST','PUT','PATCH']))
-        manifest=prepare(args.repo,args.port,command,capabilities)
+        manifest=prepare(args.repo,args.port,command,capabilities,rehearsal=args.rehearsal)
         print('Building managed images...',flush=True)
         compose(manifest,'build',timeout=1200)
         compose(manifest,'up','--detach','gateway',timeout=120)
