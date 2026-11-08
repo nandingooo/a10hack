@@ -33,8 +33,14 @@ egress:
 workspace_root: "/work"                        # everything under here is in_workspace
 
 sources:
-  default_origin: cloned-repo
-  rules: []   # operator-defined [{paths: ["/work/reviewed/**"], origin: workspace}]
+  # Your own project files are trusted; only genuinely-external content stays
+  # untrusted (the real prompt-injection vectors: vendored/third-party code,
+  # web fetches, tool output, downloads). This stops the harness from tainting
+  # the session just because the agent read your own source.
+  default_origin: workspace
+  rules:
+    - paths: ["**/vendor/**", "**/node_modules/**", "**/third_party/**", "**/downloads/**", "**/.cache/**", "**/site-packages/**", "**/dist/**", "**/build/**", "**/.git/**"]
+      origin: cloned-repo
 
 tools:
   allowed: [] # exact MCP tool names; no implicit trust for tool output
