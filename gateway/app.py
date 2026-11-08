@@ -28,12 +28,14 @@ import os
 import secrets
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+
+import ipaddress
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
+from egress import check_destination
 from policy import WEB_CONTENT, Decision, SessionState, decide_action, decide_egress, normalize_tags, stricter
 
 log = logging.getLogger("gateway")
@@ -52,7 +54,30 @@ MAX_READ_BYTES = 256 * 1024
 if not os.getenv("GATEWAY_ADMIN_KEY"):
     log.warning("GATEWAY_ADMIN_KEY not set; generated one for this run: %s", ADMIN_KEY)
 
-app = FastAPI(title="a10 gateway (placeholder)")
+app = FastAPI(title="a10 gateway (placeholder)", docs_url=None, redoc_url=None, openapi_url=None)
+
+
+def _host_side_subnet() -> list[ipaddress.IPv4Network]:
+    """Subnet of the gateway's default-route interface (the Docker bridge the host reaches
+    us through). Session networks are attached later on other interfaces and never carry
+    the default route, so sandboxes are never in this subnet."""
+    try:
+        rows = [line.split() for line in open("/proc/net/route").read().splitlines()[1:]]
+    except OSError:
+        return [ipaddress.ip_network("127.0.0.0/8")]
+    le = lambda h: str(ipaddress.IPv4Address(int(h, 16).to_bytes(4, "little")))  # noqa: E731
+    default_if = next((r[0] for r in rows if r[1] == "00000000"), None)
+    nets = [ipaddress.ip_network(f"{le(r[1])}/{le(r[7])}") for r in rows
+            if r[0] == default_if and r[1] != "00000000"]
+    return nets or [ipaddress.ip_network("127.0.0.0/8")]
+
+
+# ADMIN_SOURCES: "auto" (host side only), "any" (tests), or comma-separated CIDRs.
+_admin_sources = os.getenv("ADMIN_SOURCES", "auto")
+ADMIN_NETS = None if _admin_sources == "any" else (
+    _host_side_subnet() if _admin_sources == "auto"
+    else [ipaddress.ip_network(c.strip()) for c in _admin_sources.split(",")])
+log.info("admin API accepted from: %s", ADMIN_NETS or "anywhere")
 
 # In-memory stores. Josh's storage replaces these.
 sessions: dict[str, SessionState] = {}
@@ -86,7 +111,14 @@ def session(authorization: str = Header("")) -> SessionState:
     return sessions.setdefault(session_id, SessionState(session_id))
 
 
-def admin(authorization: str = Header("")) -> None:
+def admin(request: Request, authorization: str = Header("")) -> None:
+    if ADMIN_NETS is not None:
+        try:
+            src = ipaddress.ip_address(request.client.host)
+        except ValueError:
+            raise HTTPException(403, "admin API not reachable from here")
+        if not any(src in n for n in ADMIN_NETS):
+            raise HTTPException(403, "admin API not reachable from here")
     if not secrets.compare_digest(authorization.removeprefix("Bearer ").strip(), ADMIN_KEY):
         raise HTTPException(401, "admin key required")
 
@@ -121,6 +153,16 @@ def with_risk(state: SessionState, kind: str, detail: dict, d: Decision) -> Deci
     if stricter(risk, d.decision) != d.decision:
         return Decision(risk, "risk-layer", r.json().get("reason", "risk layer"), alert=risk == "block")
     return d
+
+
+def guard_destination(state: SessionState, kind: str, url: str) -> str:
+    """R0: the gateway never reaches internal addresses on an agent's behalf."""
+    reason, host = check_destination(url, offline=OFFLINE)
+    if reason:
+        d = Decision("block", "R0-internal-destination", reason, alert=True)
+        record(state, kind, {"url": url, "destination": host}, d)
+        enforce(d)
+    return host
 
 
 def enforce(d: Decision) -> None:
@@ -198,7 +240,7 @@ def read_file(body: ReadFile, state: SessionState = Depends(session)):
 
 @app.post("/tools/fetch_url")
 def fetch_url(body: Fetch, state: SessionState = Depends(session)):
-    host = urlparse(body.url).hostname or ""
+    host = guard_destination(state, "fetch_url", body.url)
     d = with_risk(state, "fetch_url", {"url": body.url}, decide_egress(state, host, APPROVED))
     record(state, "fetch_url", {"url": body.url, "destination": host}, d)
     enforce(d)
@@ -212,7 +254,7 @@ def fetch_url(body: Fetch, state: SessionState = Depends(session)):
 
 @app.post("/tools/send")
 def send(body: Send, state: SessionState = Depends(session)):
-    host = urlparse(body.url).hostname or ""
+    host = guard_destination(state, "send", body.url)
     d = with_risk(state, "send", {"url": body.url, "bytes": len(body.body)},
                   decide_egress(state, host, APPROVED))
     record(state, "send", {"url": body.url, "destination": host, "bytes": len(body.body)}, d)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 os.environ.update(FILES_DIR=str(HERE / "workspace/files"), GATEWAY_ADMIN_KEY="adm",
-                  APPROVED_DESTINATIONS='{"api.internal.example": "sensitive"}', OFFLINE="1")
+                  APPROVED_DESTINATIONS='{"api.internal.example": "sensitive"}', OFFLINE="1", ADMIN_SOURCES="any")
 sys.path.insert(0, str(HERE))
 
 import pytest  # noqa: E402
@@ -138,3 +138,56 @@ def test_risk_layer_can_only_tighten(client, monkeypatch):
     monkeypatch.setattr(gw.httpx, "post", lambda *a, **k: R("block"))
     r = call(client, "tok-b", "/tools/send", {"url": "https://example.com"})
     assert r.json()["detail"]["rule"] == "risk-layer"
+
+
+# ---------- R0: no internal destinations through the gateway ----------
+
+from egress import check_destination  # noqa: E402
+
+
+@pytest.mark.parametrize("url", [
+    "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+    "http://host.docker.internal:9000/sessions",
+    "http://localhost/admin/alerts",
+    "http://127.0.0.1/",
+    "http://2130706433/",            # 127.0.0.1 as a decimal
+    "http://0x7f.1/",                # 127.0.0.1 in hex shorthand
+    "http://[::1]/",
+    "http://[::ffff:169.254.169.254]/",
+    "http://10.0.0.5/",
+    "http://172.17.0.1/",
+    "http://192.168.1.1/",
+    "http://gateway/admin",
+    "http://a10-gateway/",
+    "http://example.com:9000/",      # non-standard port
+    "file:///etc/passwd",
+    "ftp://example.com/",
+    "http://user:pw@example.com/",
+    "http://metadata.google.internal/",
+])
+def test_internal_destinations_blocked(url):
+    reason, _ = check_destination(url, offline=False)
+    assert reason, url
+
+
+def test_name_resolving_to_private_ip_blocked():
+    fake = lambda host, port: [(2, 1, 6, "", ("10.1.2.3", 0))]
+    assert "10.1.2.3" in check_destination("https://innocent.example/", offline=False, resolve=fake)[0]
+
+
+def test_public_destination_allowed():
+    fake = lambda host, port: [(2, 1, 6, "", ("93.184.216.34", 0))]
+    assert check_destination("https://example.com/x", offline=False, resolve=fake)[0] is None
+
+
+def test_ssrf_through_gateway_is_blocked_and_alerts(client):
+    r = call(client, "tok-a", "/tools/fetch_url", {"url": "http://169.254.169.254/latest/meta-data/"})
+    assert r.status_code == 403 and r.json()["detail"]["rule"] == "R0-internal-destination"
+    assert client.get("/admin/alerts", headers={"Authorization": "Bearer adm"}).json()[0]["rule"] == \
+        "R0-internal-destination"
+
+
+def test_admin_rejects_non_host_sources(client, monkeypatch):
+    import ipaddress
+    monkeypatch.setattr(gw, "ADMIN_NETS", [ipaddress.ip_network("172.17.0.0/16")])
+    assert client.get("/admin/alerts", headers={"Authorization": "Bearer adm"}).status_code == 403

@@ -82,8 +82,17 @@ def main() -> int:
                               "ip": attrs["NetworkSettings"]["Networks"][info.network]["IPAddress"]})
         bridge_gw = gateway_ip_of(mgr.client, "bridge")
 
+        try:
+            gw_tags = mgr.client.containers.get(mgr.config.gateway_container).image.tags
+        except NotFound:
+            gw_tags = []
+        real_gateway = any(t.startswith("a10-gateway") for t in gw_tags)
+        print("gateway: " + ("real a10-gateway (tool + SSRF checks on)" if real_gateway
+                             else "stand-in (tool + SSRF checks skipped)"))
+
         def cfg_for(i, info):
             return {
+                "gateway_tools": real_gateway,
                 "gateway": None if args.no_gateway else f"gateway:{mgr.config.gateway_port}",
                 "peers": [e for j, e in enumerate(endpoints) if j != i],
                 "host_ips": sorted(set(bridge_gw + gateway_ip_of(mgr.client, info.network))),

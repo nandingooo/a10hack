@@ -30,6 +30,12 @@ LABEL_SESSION = "a10.session_id"
 LABEL_ROLE = "a10.role"
 LABEL_CREATED = "a10.created_at"
 LABEL_AGENTS = "a10.agents"
+# Docker's own default seccomp profile (moby v24.0.7), applied explicitly because a
+# daemon can be configured with seccomp=unconfined (Docker Desktop here was).
+SECCOMP_PROFILE = json.dumps(
+    json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "seccomp-default.json"))),
+    separators=(",", ":"),
+)
 SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 
@@ -139,11 +145,17 @@ class SandboxManager:
                     "/home/agent/work": f"rw,noexec,nosuid,uid=10001,size={limits['tmpfs_size']}",
                 },
                 cap_drop=["ALL"],
-                security_opt=["no-new-privileges:true"],
+                security_opt=["no-new-privileges:true", f"seccomp={SECCOMP_PROFILE}"],
                 mem_limit=limits["mem_limit"],
                 memswap_limit=limits["mem_limit"],
                 nano_cpus=int(limits["cpus"] * 1e9),
                 pids_limit=limits["pids_limit"],
+                # No IPv6 at all: the only path out is IPv4 to the gateway.
+                sysctls={"net.ipv6.conf.all.disable_ipv6": "1", "net.ipv6.conf.default.disable_ipv6": "1"},
+                ipc_mode="private",
+                shm_size="16m",
+                # stdout/stderr land on the host; cap them so an agent can't fill the disk.
+                log_config={"type": "json-file", "config": {"max-size": "5m", "max-file": "1"}},
                 init=True,
                 auto_remove=False,
             )

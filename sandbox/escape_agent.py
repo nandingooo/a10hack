@@ -14,12 +14,30 @@ import json
 import os
 import shutil
 import socket
+import ipaddress
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 TIMEOUT = 2.0
 results = []
+
+
+def pool_map(fn, items, workers):
+    """Thread pool that shrinks instead of crashing when the sandbox's process limit is
+    exhausted (e.g. by sibling agents' limit probes)."""
+    items = list(items)
+    while True:
+        try:
+            with ThreadPoolExecutor(workers) as pool:
+                return list(pool.map(fn, items))
+        except RuntimeError:
+            if workers == 1:
+                raise
+            workers = max(1, workers // 4)
+            __import__("time").sleep(1)
 
 
 def record(check, expect, got_through, detail=""):
@@ -86,8 +104,97 @@ def network_checks(cfg):
     if cfg.get("gateway"):
         host, port = cfg["gateway"].rsplit(":", 1)
         jobs.append(lambda: tcp_check("CONTROL gateway reachable", host, int(port), expect="allowed"))
-    with ThreadPoolExecutor(32) as pool:
-        list(pool.map(lambda f: f(), jobs))
+    done = set()
+
+    def run(job):
+        i, f = job
+        if i not in done:
+            f()
+            done.add(i)
+
+    pool_map(run, enumerate(jobs), 32)
+
+
+def own_ipv4():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("gateway", 9))  # no packet sent; just picks the interface
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
+def subnet_scan(cfg):
+    """Every address in our /24: only the gateway (and us) may answer."""
+    me = own_ipv4()
+    if not me:
+        return record("scan sandbox subnet: only gateway answers", "allowed", False, "no IPv4 address")
+    try:
+        gw_ip = socket.gethostbyname("gateway")
+    except OSError:
+        gw_ip = None
+    net = ipaddress.ip_network(f"{me}/24", strict=False)
+    targets = [str(h) for h in net.hosts() if str(h) not in (me, gw_ip)]
+
+    def probe(ip):
+        # One port is enough: a host that exists answers (connect or refuse) on any port.
+        try:
+            with socket.create_connection((ip, 80), timeout=1):
+                return ip
+        except ConnectionRefusedError:
+            return ip
+        except OSError:
+            return None
+
+    found = [ip for ip in pool_map(probe, targets, 40) if ip]
+    record("scan sandbox subnet: anything besides gateway", "blocked", bool(found),
+           f"{len(targets)} addresses scanned; answered: {found[:5]}")
+
+
+def gateway_request(path, body=None):
+    gw = os.environ.get("GATEWAY_URL", "http://gateway:8080")
+    req = urllib.request.Request(gw + path, method="GET" if body is None else "POST",
+                                 data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Authorization": "Bearer " + os.environ.get("SESSION_TOKEN", ""),
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, ""
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()[:150].decode(errors="replace")
+    except OSError as e:
+        return 0, str(e)
+
+
+SSRF_TARGETS = [
+    "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+    "http://host.docker.internal:9000/sessions",
+    "http://127.0.0.1:8080/admin/alerts",
+    "http://localhost/",
+    "http://2130706433/",
+    "http://[::1]/",
+    "http://172.17.0.1/",
+    "http://10.0.0.1/",
+    "http://gateway:8080/admin/alerts",
+    "file:///etc/passwd",
+]
+
+
+def gateway_checks(cfg):
+    if not cfg.get("gateway"):
+        return
+    code, detail = gateway_request("/admin/alerts")
+    record("gateway admin API from sandbox", "blocked", code == 200, f"HTTP {code} {detail}")
+    if not cfg.get("gateway_tools"):
+        return
+    code, detail = gateway_request("/tools/list_files")
+    record("CONTROL gateway tools work", "allowed", code == 200, f"HTTP {code} {detail}")
+    for url in SSRF_TARGETS:
+        code, detail = gateway_request("/tools/fetch_url", {"url": url})
+        record(f"via gateway: fetch {url.split('/')[2] if '//' in url else url}", "blocked",
+               code == 200, f"HTTP {code} {detail}")
 
 
 def try_(fn):
@@ -147,6 +254,13 @@ def system_checks():
     record("running as root", "blocked", os.getuid() == 0, f"uid={os.getuid()}")
     cap = status_field("CapEff")
     record("has Linux capabilities", "blocked", int(cap or "0", 16) != 0, f"CapEff={cap}")
+    seccomp = status_field("Seccomp")
+    record("syscall filter (seccomp) off", "blocked", seccomp != "2", f"Seccomp={seccomp}")
+    v6 = [l.split()[-1] + " " + l.split()[0] for l in open("/proc/net/if_inet6")
+          if l.split()[-1] != "lo"] if os.path.exists("/proc/net/if_inet6") else []
+    record("has IPv6 address", "blocked", bool(v6), v6 or "no IPv6")
+    record("create user namespace (unshare)", "blocked",
+           *try_(lambda: os.unshare(os.CLONE_NEWUSER) or "unshared"))
     nnp = status_field("NoNewPrivs")
     record("can gain privileges (setuid)", "blocked", nnp != "1", f"NoNewPrivs={nnp}")
     record("docker socket present", "blocked", *try_(lambda: os.stat("/var/run/docker.sock") and "exists"))
@@ -195,6 +309,8 @@ def resource_checks():
 def main():
     cfg = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
     network_checks(cfg)
+    subnet_scan(cfg)
+    gateway_checks(cfg)
     system_checks()
     resource_checks()
     print(json.dumps({"results": results}))

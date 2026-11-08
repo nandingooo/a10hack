@@ -33,6 +33,16 @@ def main() -> int:
              [*PY, f"import socket; socket.create_connection(('{info_b.container_name}', 80), timeout=3)"],
              False),
         ]
+        checks += [
+            ("syscall filter (seccomp) on", [*PY, "assert 'Seccomp:\\t2' in open('/proc/self/status').read()"], True),
+            ("no IPv6 addresses", [*PY, "assert all(l.split()[-1] == 'lo' for l in open('/proc/net/if_inet6'))"
+                                   " if __import__('os').path.exists('/proc/net/if_inet6') else None"], True),
+        ]
+        log_cfg = mgr.client.containers.get(info_a.container_name).attrs["HostConfig"]["LogConfig"]
+        ok = log_cfg.get("Config", {}).get("max-size") == "5m"
+        failed += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  container logs capped on host  {log_cfg}" if not ok else
+              "PASS  container logs capped on host")
         for name, cmd, should_succeed in checks:
             code, out = mgr.exec(a, cmd)
             ok = (code == 0) == should_succeed
@@ -41,7 +51,7 @@ def main() -> int:
     finally:
         mgr.destroy(a)
         mgr.destroy(b)
-    print(f"\n{len(CHECKS) + 1 - failed} passed, {failed} failed")
+    print(f"\n{len(checks) + 1 - failed} passed, {failed} failed")
     return 1 if failed else 0
 
 
