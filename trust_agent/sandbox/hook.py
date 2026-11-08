@@ -21,6 +21,34 @@ URL = os.environ.get("AIRLOCK_URL", "http://127.0.0.1:8787") + "/decide"
 READ = {"Read", "Grep", "Glob", "NotebookRead"}
 WRITE = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # robust unicode on Windows pipes
+except Exception:
+    pass
+
+
+def _respond(permission: str, label: str, rule: str, reason: str) -> int:
+    """Structured PreToolUse response so Claude Code renders a clean denial
+    (shown in red to the user, reason fed back to the agent)."""
+    msg = f"TrustAgent {label} [{rule}]: {reason}"
+    print(json.dumps({
+        "systemMessage": msg,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": permission,          # "deny" | "ask" | "allow"
+            "permissionDecisionReason": msg,
+        },
+    }))
+    return 0
+
+
+def _deny(rule: str, reason: str) -> int:
+    return _respond("deny", "BLOCKED", rule, reason)
+
+
+def _ask(rule: str, reason: str) -> int:
+    return _respond("ask", "NEEDS APPROVAL", rule, reason)
+
 
 def to_request(ev: dict):
     tool = ev.get("tool_name") or ""
@@ -59,15 +87,15 @@ def main() -> int:
         )
         verdict = json.loads(r.read())
     except Exception as e:  # service down/unreachable -> fail closed
-        print(f"AgentAirlock: decision service unreachable -> BLOCK (fail-closed): {e}", file=sys.stderr)
-        return 2
+        return _deny("fail_closed", f"decision service unreachable: {e}")
     decision = verdict.get("decision", "allow")
-    if decision in ("block", "stop", "ask"):
-        # 'ask' would hold for a human in the full build; for the hook demo we block.
-        print(f"AgentAirlock BLOCKED [{verdict.get('rule')}]: {verdict.get('reason')} "
-              f"(confidence {verdict.get('confidence')})", file=sys.stderr)
-        return 2
-    return 0
+    rule = verdict.get("rule", "")
+    reason = f"{verdict.get('reason', '')} (confidence {verdict.get('confidence')})"
+    if decision in ("block", "stop"):
+        return _deny(rule, reason)
+    if decision == "ask":
+        return _ask(rule, reason)
+    return 0  # allow
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ if _APP not in sys.path:
 
 from provenance import (  # noqa: E402
     ActionProps, Channel, ContextEntry, GraphStore, Kind, Labeler, Op,
-    Sensitivity, new_entry_id,
+    Sensitivity, SqliteStore, new_entry_id,
 )
 from monitor.daemon import default_policy, resolve_origin  # noqa: E402
 
@@ -41,8 +41,8 @@ _DESTRUCTIVE = ("rm -rf", "rm -r ", "git push --force", "git push -f", "drop tab
 class Brain:
     """The decision engine: label -> append to graph -> trace_back -> decide."""
 
-    def __init__(self) -> None:
-        self.store = GraphStore()
+    def __init__(self, store=None) -> None:
+        self.store = store if store is not None else GraphStore()
         self.labeler = Labeler(default_policy())
         self.killed: set[str] = set()
         self._seq: dict[str, int] = {}
@@ -51,8 +51,17 @@ class Brain:
         self._seq[session] = self._seq.get(session, 0) + 1
         return new_entry_id(session, self._seq[session])
 
+    def _is_killed(self, session: str) -> bool:
+        if session in self.killed:
+            return True
+        checker = getattr(self.store, "is_killed", None)
+        return bool(checker(session)) if checker else False
+
     def kill(self, session: str) -> None:
         self.killed.add(session)
+        store_kill = getattr(self.store, "kill", None)   # persist the kill (SqliteStore)
+        if store_kill:
+            store_kill(session)
 
     def decide(self, req: dict) -> dict:
         session = req.get("session_id") or "unknown"
@@ -60,7 +69,7 @@ class Brain:
         target = req.get("target") or ""
         args = req.get("args") or {}
 
-        if session in self.killed:
+        if self._is_killed(session):
             return _v("stop", "session_killed", "session already terminated", 1.0)
 
         origin = req.get("origin") or resolve_origin(op, target)
@@ -159,7 +168,13 @@ class _Handler(BaseHTTPRequestHandler):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="AgentAirlock decision service")
     ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument("--db", default=None,
+                    help="persist to a SQLite DB (William-compatible) instead of in-memory graph")
     a = ap.parse_args(argv)
+    global BRAIN
+    if a.db:
+        BRAIN = Brain(store=SqliteStore(a.db))
+        print(f"AgentAirlock: persisting provenance to {a.db}", flush=True)
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), _Handler)
     print(f"AgentAirlock decision service on http://127.0.0.1:{a.port} "
           f"(POST /decide, /kill; GET /health)", flush=True)

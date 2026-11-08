@@ -11,6 +11,7 @@ from .store import (
 )
 from .queue_store import QueueStore
 from .graph_store import GraphStore
+from .sqlite_store import SqliteStore
 from .labeler import Labeler, Policy, match
 from .multiagent import (
     AGENT_ORIGIN_PREFIX, SHARED_ORIGIN_PREFIX, INBOUND_CONFIDENCE,
@@ -21,7 +22,7 @@ __all__ = [
     "Labels", "Sensitivity", "Trust",
     "ActionProps", "Aggregate", "Channel", "ContextEntry", "Kind", "Op",
     "ProvenanceStore", "Session", "SINK_OPS",
-    "QueueStore", "GraphStore", "Labeler", "Policy", "match",
+    "QueueStore", "GraphStore", "SqliteStore", "Labeler", "Policy", "match",
     "AGENT_ORIGIN_PREFIX", "SHARED_ORIGIN_PREFIX", "INBOUND_CONFIDENCE",
     "derive_inbound_labels", "is_cross_agent_origin", "new_entry_id",
 ]
