@@ -289,3 +289,8 @@ def admin_events(session_id: str):
 @app.get("/admin/alerts", dependencies=[Depends(admin)])
 def admin_alerts():
     return alerts
+
+
+# Model API proxy and MCP server register their routes on `app`.
+import llm  # noqa: E402,F401
+import mcp  # noqa: E402,F401

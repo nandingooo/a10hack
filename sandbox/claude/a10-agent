@@ -1,0 +1,15 @@
+#!/bin/sh
+# Run Claude Code inside the sandbox, wired to the gateway:
+#  - model calls: ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN (set by the sandbox manager)
+#  - project files and the web: the gateway's MCP tools (mcp__gateway__*), passed per run
+#    with --strict-mcp-config so no other MCP server can be loaded and parallel agents
+#    don't race on a shared config file
+#  - WebSearch / WebFetch denied by /etc/claude-code/managed-settings.json
+# The root filesystem is read-only, so Claude Code's state lives in the scratch dir.
+set -e
+export HOME=/home/agent/work
+export CLAUDE_CONFIG_DIR="$HOME/.claude"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+MCP=$(printf '{"mcpServers":{"gateway":{"type":"http","url":"%s/mcp","headers":{"Authorization":"Bearer %s"}}}}' \
+  "$GATEWAY_URL" "$SESSION_TOKEN")
+exec claude --mcp-config "$MCP" --strict-mcp-config "$@"

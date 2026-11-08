@@ -89,3 +89,12 @@ def decide_egress(state: SessionState, destination: str, approved: dict[str, str
             return Decision("block", "R2-destination", f"{destination} is not approved for secret data")
         return Decision("ask", "R2-destination", f"{destination} is not approved for {state.sensitivity} data")
     return ALLOW
+
+
+def decide_llm(state: SessionState) -> Decision:
+    """A model API call. The destination is pinned to the model provider (the agent can't
+    choose it), so R2/R3 don't apply: sending context to the model is how the agent thinks.
+    R4 still does: after a decoy read nothing leaves the sandbox, model calls included."""
+    if state.bait:
+        return Decision("block", "R4-bait", "a decoy was read in this session", alert=True)
+    return Decision("allow", "llm", "model call to the pinned provider")

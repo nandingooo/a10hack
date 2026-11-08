@@ -17,6 +17,10 @@ docker run -d --name a10-gateway \
   -e SANDBOX_API_URL="${SANDBOX_API_URL:-http://host.docker.internal:9000}" \
   -e SANDBOX_API_KEY -e GATEWAY_ADMIN_KEY -e APPROVED_DESTINATIONS -e OFFLINE \
   ${RISK_URL:+-e RISK_URL} \
+  ${LLM_UPSTREAM:+-e LLM_UPSTREAM} ${ANTHROPIC_API_KEY:+-e ANTHROPIC_API_KEY} \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
   a10-gateway:latest >/dev/null
+# Optional: also join the network a mock model upstream lives on (gateway/mock_upstream.sh).
+if [ -n "$UPSTREAM_NETWORK" ]; then docker network connect "$UPSTREAM_NETWORK" a10-gateway; fi
+[ -n "$ANTHROPIC_API_KEY" ] || echo "note: ANTHROPIC_API_KEY not set; /llm will return 503"
 echo "gateway running: http://127.0.0.1:8080 (admin key: $GATEWAY_ADMIN_KEY)"

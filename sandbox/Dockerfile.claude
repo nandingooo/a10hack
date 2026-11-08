@@ -1,0 +1,22 @@
+# Sandbox image with Claude Code as the agent. Same isolation as the base image; the
+# manager applies the same container limits. Build from the sandbox/ directory:
+#   docker build -f Dockerfile.claude -t a10-agent-claude .
+FROM node:22.11.0-bookworm-slim
+
+# Measured: ~110-150 MiB per Claude Code agent; the manager sizes sandboxes from this.
+LABEL a10.per_agent_mem_mb=160
+
+RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @anthropic-ai/claude-code@2.1.310 \
+ && npm cache clean --force \
+ && useradd --uid 10001 --create-home --shell /usr/sbin/nologin agent
+
+# Managed settings live on the read-only root filesystem, so the agent can't change them.
+COPY claude/managed-settings.json /etc/claude-code/managed-settings.json
+COPY claude/a10-agent /usr/local/bin/a10-agent
+RUN chmod 755 /usr/local/bin/a10-agent && chmod 644 /etc/claude-code/managed-settings.json
+
+USER agent
+WORKDIR /home/agent/work
+CMD ["sleep", "infinity"]

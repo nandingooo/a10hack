@@ -55,7 +55,7 @@ class SandboxConfig:
     max_agents: int = int(os.getenv("SANDBOX_MAX_AGENTS", "32"))
     max_cpus: float = float(os.getenv("SANDBOX_MAX_CPUS", "4"))
 
-    def limits_for(self, agents: int | None) -> dict:
+    def limits_for(self, agents: int | None, per_agent_mem_mb: int | None = None) -> dict:
         """Resource limits for a sandbox. None = the fixed defaults above."""
         if agents is None:
             return {"mem_limit": self.mem_limit, "cpus": self.cpus,
@@ -63,7 +63,7 @@ class SandboxConfig:
         if not 1 <= agents <= self.max_agents:
             raise ValueError(f"agents must be between 1 and {self.max_agents}")
         return {
-            "mem_limit": f"{self.base_mem_mb + self.per_agent_mem_mb * agents}m",
+            "mem_limit": f"{self.base_mem_mb + (per_agent_mem_mb or self.per_agent_mem_mb) * agents}m",
             "cpus": min(self.max_cpus, max(1.0, 0.5 * agents)),
             "pids_limit": 64 + 32 * agents,
             "tmpfs_size": f"{64 + 8 * agents}m",
@@ -103,7 +103,7 @@ class SandboxManager:
     ) -> SandboxInfo:
         """Create a sandbox. agents=N sizes memory/CPU/process limits for N parallel agents."""
         container_name, network_name = self._names(session_id)
-        limits = self.config.limits_for(agents)
+        limits = self.config.limits_for(agents, self._image_per_agent_mem(agents))
         labels = {LABEL_SESSION: session_id}
         created = time.time()
         token = secrets.token_urlsafe(32)
@@ -137,6 +137,12 @@ class SandboxManager:
                     "SESSION_ID": session_id,
                     "SESSION_TOKEN": token,
                     "GATEWAY_URL": gateway_url,
+                    # Model calls go through the gateway, which swaps this session token for
+                    # the real API key; no API key ever enters the sandbox.
+                    "ANTHROPIC_BASE_URL": f"{gateway_url}/llm",
+                    "ANTHROPIC_AUTH_TOKEN": token,
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                    "DISABLE_AUTOUPDATER": "1",
                 },
                 user="10001:10001",
                 read_only=True,
@@ -177,6 +183,17 @@ class SandboxManager:
         self.last_seen[session_id] = created
         log.info("created sandbox %s", container_name)
         return info
+
+    def _image_per_agent_mem(self, agents: int | None) -> int | None:
+        """An image can declare how much memory one of its agents needs
+        (LABEL a10.per_agent_mem_mb=...); SANDBOX_PER_AGENT_MEM_MB overrides it."""
+        if agents is None or os.getenv("SANDBOX_PER_AGENT_MEM_MB"):
+            return None
+        try:
+            label = self.client.images.get(self.config.image).labels.get("a10.per_agent_mem_mb")
+            return int(label) if label else None
+        except (NotFound, ValueError):
+            return None
 
     def _attach_gateway(self, network) -> bool:
         try:
