@@ -29,7 +29,9 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 import classifier  # noqa: E402
 
-MODELS = {"22M": "meta-llama/Llama-Prompt-Guard-2-22M", "86M": "meta-llama/Llama-Prompt-Guard-2-86M"}
+# All three are binary DeBERTa classifiers with the injection/malicious class at index 1.
+MODELS = {"22M": "meta-llama/Llama-Prompt-Guard-2-22M", "86M": "meta-llama/Llama-Prompt-Guard-2-86M",
+          "protectai": "protectai/deberta-v3-base-prompt-injection-v2"}
 
 # G: one harmless ~12 KiB document (inside the 16 KiB scoring limit), with injections placed
 # at the start, middle and end. Paragraphs vary so the text isn't one repeated sentence.
@@ -101,7 +103,7 @@ def evaluate(model: str, cases: list[dict], show: bool) -> dict:
 
 def report(models: list[str], cases: list[dict], title: str) -> None:
     th = classifier.THRESHOLD
-    names = [m.split("-")[-1] for m in models]
+    names = [next(k for k, v in MODELS.items() if v == m) for m in models]
     print(f"\n{title} (threshold {th}; injection rows = caught, harmless rows = false alarms)")
     print(f"{'category':<30}{'n':>4}  " + "  ".join(f"{n:>9}" for n in names))
     groups = defaultdict(list)
