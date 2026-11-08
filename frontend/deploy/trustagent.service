@@ -1,0 +1,22 @@
+# systemd unit for running the gateway on a Linux server in public mode.
+# Install: sudo cp deploy/trustagent.service /etc/systemd/system/
+#          sudo cp deploy/trustagent.env.example /etc/trustagent.env   (then edit it)
+#          sudo systemctl daemon-reload && sudo systemctl enable --now trustagent
+# Logs:    journalctl -u trustagent -f
+[Unit]
+Description=TrustAgent gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/a10hack/frontend
+EnvironmentFile=/etc/trustagent.env
+ExecStart=/usr/bin/python3 demo/gateway.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
